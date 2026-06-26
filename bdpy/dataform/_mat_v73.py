@@ -131,7 +131,11 @@ def read_cell(f: h5py.File, dset: h5py.Dataset) -> list:
     data = dset[()]
     if isinstance(data, np.ndarray) and data.dtype == object:
         return [read_dataset(f[ref]) for ref in data.ravel()]
-    arr = np.asarray(data)
+    # Plain matrix: read through read_dataset so a MATLAB-style field (written
+    # with MATLAB_class, hence transposed) is un-transposed before being split
+    # row-by-row. Files without MATLAB_class (older bdpy / Julia fixtures) are
+    # unaffected because read_dataset is then a no-op.
+    arr = np.asarray(read_dataset(dset))
     return [arr[i] for i in range(arr.shape[0])]
 
 
@@ -279,21 +283,53 @@ def _matfile_header() -> bytes:
     return bytes(header)
 
 
+def _write_struct(parent: h5py.Group, key: str, fields: dict) -> h5py.Group:
+    """Write a dict as a MATLAB v7.3 struct group under ``parent[key]``.
+
+    The group is tagged with ``MATLAB_class == 'struct'`` and ``MATLAB_fields``
+    (the field names, in order, as the MATLAB array-of-char-arrays encoding) so
+    MATLAB sees a struct; each field is written with :func:`write_dataset`.
+    """
+    if not key or "/" in key:
+        raise ValueError(
+            "Invalid key for the MATLAB v7.3 writer: %r" % (key,))
+    group = parent.create_group(key)
+    group.attrs["MATLAB_class"] = np.bytes_(b"struct")
+
+    names = list(fields.keys())
+    # MATLAB_fields is an array of variable-length char (S1) arrays, one per
+    # field name -- matching the documented MATLAB v7.3 struct field encoding.
+    vlen_s1 = h5py.special_dtype(vlen=np.dtype("S1"))
+    field_names = np.empty((len(names),), dtype=vlen_s1)
+    for i, name in enumerate(names):
+        field_names[i] = np.frombuffer(name.encode("ascii"), dtype="S1")
+    group.attrs.create("MATLAB_fields", field_names)
+
+    for name, value in fields.items():
+        write_dataset(group, name, np.asarray(value))
+    return group
+
+
 def savemat(fname: str, mdict: dict, mode: str = "w") -> None:
     """Write variables to a MATLAB v7.3 (HDF5) ``.mat`` file.
 
-    Each value in ``mdict`` is stored as a top-level dense numeric array via
-    :func:`write_dataset`. When ``mode == 'w'`` (the default) a fresh file is
-    created with a MATLAB v7.3 MAT-file userblock header so that MATLAB
-    recognizes it; with ``mode == 'a'`` the existing file (and its header) is
-    kept and only the listed keys are written, replacing any of the same name.
+    Each value in ``mdict`` is stored as a top-level variable: a plain array
+    goes through :func:`write_dataset`, while a ``dict`` value is written as a
+    MATLAB struct via :func:`_write_struct`. When ``mode == 'w'`` (the default)
+    a fresh file is created with a MATLAB v7.3 MAT-file userblock header so that
+    MATLAB recognizes it; with ``mode == 'a'`` the existing file (and its
+    header, if any) is kept and only the listed keys are written, replacing any
+    of the same name. Note that an HDF5 userblock can only be reserved at
+    creation, so appending to a file that lacks one cannot add a MAT-file
+    header.
 
     Parameters
     ----------
     fname : str
         Output path.
     mdict : dict
-        Mapping of variable name to array.
+        Mapping of variable name to an array, or to a dict (written as a
+        MATLAB struct).
     mode : str, optional
         h5py file mode (``'w'`` to create, ``'a'`` to append/replace keys).
     """
@@ -306,7 +342,10 @@ def savemat(fname: str, mdict: dict, mode: str = "w") -> None:
         for key, value in mdict.items():
             if key in f:
                 del f[key]
-            write_dataset(f, key, np.asarray(value))
+            if isinstance(value, dict):
+                _write_struct(f, key, value)
+            else:
+                write_dataset(f, key, np.asarray(value))
     finally:
         f.close()
     if write_header:

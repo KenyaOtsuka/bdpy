@@ -72,30 +72,23 @@ class SparseArray(object):
         return self.__make_dense()
 
     def save(self, fname, key='data', dtype=np.float64):
-        # Write the sparse-array struct with h5py. We replace only ``key`` in
-        # the target file, leaving any other variables already stored there
-        # untouched.
-        self.__save_h5py(fname, key=key, dtype=dtype)
-        return None
-
-    def __save_h5py(self, fname, key='data', dtype=np.float64):
-        # h5py writer for the sparse-array struct. The layout mirrors what
-        # ``__load`` expects: ``index``/``shape`` as plain matrices (which
-        # _mat_v73.read_cell restores row-by-row) and ``value``/``background``
-        # as plain datasets. Opening in append mode and deleting only ``key``
-        # preserves any other top-level variables in the file.
+        # Write the sparse-array struct through _mat_v73.savemat's dict/struct
+        # writer, so dense and sparse share the same MATLAB-v7.3-compatible
+        # writer (group with MATLAB_class='struct' + MATLAB_fields, each field
+        # written in MATLAB layout). Append to an existing file (replacing only
+        # ``key``) so other top-level variables are preserved; a brand-new file
+        # gets the MAT-file userblock header from savemat.
         index = np.vstack([np.asarray(i, dtype=np.int64).ravel()
                            for i in self.__index])
+        payload = {
+            u'__bdpy_sparse_arrray': np.array(True),
+            u'index': index,
+            u'value': self.__value.astype(dtype).ravel(),
+            u'shape': np.asarray(self.__shape, dtype=np.int64),
+            u'background': np.asarray(self.__background),
+        }
         mode = 'a' if os.path.exists(fname) else 'w'
-        with h5py.File(fname, mode) as f:
-            if key in f:
-                del f[key]
-            g = f.create_group(key)
-            g.create_dataset(u'__bdpy_sparse_arrray', data=True)
-            g.create_dataset(u'index', data=index)
-            g.create_dataset(u'value', data=self.__value.astype(dtype).ravel())
-            g.create_dataset(u'shape', data=np.asarray(self.__shape, dtype=np.int64))
-            g.create_dataset(u'background', data=np.asarray(self.__background))
+        _mat_v73.savemat(fname, {key: payload}, mode=mode)
         return None
 
     def __make_sparse(self, array):
@@ -111,8 +104,10 @@ class SparseArray(object):
 
     def __load(self, fname, key='data'):
         # Read with h5py instead of the legacy MAT-v7.3 library (NumPy 2.0).
-        # The struct stores ``index``/``shape`` as cell arrays (object refs) when
-        # written by bdpy, or as plain matrices when written by other tools.
+        # read_cell handles all writer flavors of ``index``/``shape``: legacy
+        # cell arrays (object refs), and plain matrices written either by other
+        # tools (no MATLAB_class) or by bdpy's MATLAB-style writer (MATLAB_class
+        # set, transposed -- un-transposed by read_cell).
         with h5py.File(fname, 'r') as f:
             g = f[key]
             self.__index = tuple(

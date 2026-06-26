@@ -62,6 +62,48 @@ class TestSparse(unittest.TestCase):
             with h5py.File(fname, 'r') as f:
                 np.testing.assert_array_equal(f['other'][()], np.array([1, 2, 3]))
 
+    def test_sparse_save_int_and_bool_round_trip(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cases = [
+                (np.array([[0, 2, 0], [3, 0, 0]], dtype=np.int64), np.int64),
+                (np.array([[True, False], [False, True]]), np.bool_),
+            ]
+            for i, (original, dtype) in enumerate(cases):
+                fname = os.path.join(tmpdir, 'sparse_dtype_%d.mat' % i)
+                save_array(fname, original, key='data', sparse=True, dtype=dtype)
+                from_file = load_array(fname, key='data')
+                np.testing.assert_array_equal(original, from_file)
+
+    def test_sparse_save_writes_matlab_v73_struct(self):
+        # A freshly created sparse file must be a MATLAB v7.3 struct: a group
+        # tagged MATLAB_class='struct' with MATLAB_fields, fields carrying
+        # MATLAB_class, and a MAT-file userblock header at the start of the file.
+        # (Kept separate from the preserve-other-variables test, whose
+        # pre-existing plain file has no userblock.)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fname = os.path.join(tmpdir, 'sparse_struct.mat')
+            original = np.array([[1., 0, 0, 0], [2, 2, 0, 0], [3, 3, 3, 0]])
+            save_array(fname, original, key='data', sparse=True)
+
+            with open(fname, 'rb') as fh:
+                header = fh.read(128)
+            self.assertTrue(header.startswith(b'MATLAB 7.3 MAT-file'))
+            self.assertEqual(header[124:126], b'\x00\x02')
+            self.assertEqual(header[126:128], b'IM')
+
+            with h5py.File(fname, 'r') as f:
+                g = f['data']
+                self.assertIsInstance(g, h5py.Group)
+                self.assertEqual(bytes(g.attrs['MATLAB_class']), b'struct')
+                fields = [b''.join(list(x)).decode('ascii')
+                          for x in g.attrs['MATLAB_fields']]
+                self.assertEqual(
+                    set(fields),
+                    {'__bdpy_sparse_arrray', 'index', 'value', 'shape',
+                     'background'})
+                for name in fields:
+                    self.assertIn('MATLAB_class', g[name].attrs)
+
     def test_load_array_jl(self):
         data = np.array([[1, 0, 0, 0],
                          [2, 2, 0, 0],
