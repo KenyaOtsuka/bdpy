@@ -44,10 +44,7 @@ class TestSparse(unittest.TestCase):
 
                 np.testing.assert_array_equal(original_data, from_file)
 
-    def test_sparse_save_preserves_other_variables_under_numpy2(self):
-        if int(np.__version__.split('.')[0]) < 2:
-            self.skipTest('NumPy-2-only h5py writer')
-
+    def test_sparse_save_preserves_other_variables(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             fname = os.path.join(tmpdir, 'test_sparse_preserve.mat')
 

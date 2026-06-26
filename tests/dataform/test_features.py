@@ -7,8 +7,8 @@ import tempfile
 
 import numpy as np
 from numpy.testing import assert_array_equal
-import hdf5storage
 
+from bdpy.dataform import _mat_v73
 from bdpy.dataform.features import Features
 
 
@@ -32,11 +32,9 @@ def _prepare_mock_data(
         # sorts the feature files when collecting labels.
         for image_name in sorted(mock_image_names):
             data = np.random.rand(*shape)
-            hdf5storage.savemat(
+            _mat_v73.savemat(
                 os.path.join(tmpdir, layer_name, image_name + '.mat'),
-                {'feat': data},
-                format='7.3',
-                store_python_metadata=True)
+                {'feat': data})
             arrays.append(data)
         stacked[layer_name] = np.vstack(arrays)
     return stacked
