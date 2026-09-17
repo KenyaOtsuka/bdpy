@@ -2,10 +2,12 @@ import unittest
 
 import pickle
 import warnings
+from unittest.mock import patch
 
 import numpy as np
 from scipy.spatial.distance import cdist
 
+from bdpy.evals import metrics
 from bdpy.evals.metrics import profile_correlation, pattern_correlation, pairwise_identification
 
 
@@ -267,6 +269,44 @@ class TestMetricsNanAndDegenerateInputs(unittest.TestCase):
         np.testing.assert_allclose(
             cr, identification_accuracy(pred, true, metric='euclidean'),
             rtol=1e-12, atol=1e-12
+        )
+
+    def test_results_do_not_depend_on_the_block_size(self):
+        # The metrics process the units in blocks to bound memory usage. Shrink
+        # a block so that several of them are needed, with the NaN column
+        # falling inside a block rather than on its boundary.
+        n_sample, n_feat, nan_col = 8, 37, 17
+        rand = np.random.RandomState(8)
+        x = rand.rand(n_sample, n_feat)
+        y = rand.rand(n_sample, n_feat)
+        x[5, nan_col] = np.nan
+
+        with patch.object(metrics, '_BLOCK_ELEMENTS', 3 * n_sample):
+            r_prof = profile_correlation(x, y).ravel()
+            with self.assertWarns(UserWarning):
+                r_patt = pattern_correlation(x, y)
+            with self.assertWarns(UserWarning):
+                cr = pairwise_identification(x, y)
+
+        self.assertTrue(np.isnan(r_prof[nan_col]))
+        np.testing.assert_allclose(
+            np.delete(r_prof, nan_col),
+            [
+                np.corrcoef(x[:, j], y[:, j])[0, 1]
+                for j in range(n_feat) if j != nan_col
+            ],
+            rtol=1e-12, atol=1e-12
+        )
+
+        xd = np.delete(x, nan_col, axis=1)
+        yd = np.delete(y, nan_col, axis=1)
+        np.testing.assert_allclose(
+            r_patt,
+            [np.corrcoef(xd[i, :], yd[i, :])[0, 1] for i in range(n_sample)],
+            rtol=1e-12, atol=1e-12
+        )
+        np.testing.assert_allclose(
+            cr, identification_accuracy(xd, yd), rtol=1e-12, atol=1e-12
         )
 
 
