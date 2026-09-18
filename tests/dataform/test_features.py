@@ -6,8 +6,9 @@ import os
 import tempfile
 
 import numpy as np
-from numpy.testing import assert_array_equal
+from numpy.testing import assert_array_equal, assert_allclose
 import hdf5storage
+import scipy.io as sio
 
 from bdpy.dataform import _mat_v73
 from bdpy.dataform.features import Features, save_feature
@@ -41,6 +42,28 @@ def prepare_mat_features(
             arrays.append(data)
         stacked[layer_name] = np.vstack(arrays)
     return stacked
+
+
+def write_index_file(
+        path: str,
+        index: dict,
+        matlab_style: bool = False,
+        format: str = '7.3'
+    ) -> None:
+    """Write a `feature_index` file: a struct mapping layer name to unit index.
+
+    With `matlab_style` the Python metadata is omitted, which is how MATLAB (and
+    any non-hdf5storage writer) stores a struct: no ``Python.Shape``, so the
+    index reads back as a 2-D row vector.
+    """
+    if format == '5':
+        sio.savemat(path, {'index': index}, format='5')
+        return
+    hdf5storage.savemat(
+        path,
+        {'index': index},
+        format='7.3',
+        store_python_metadata=not matlab_style)
 
 
 class TestDataformFeatures(unittest.TestCase):
@@ -189,23 +212,84 @@ class TestFeaturesPartialRead(unittest.TestCase):
 class TestFeaturesFeatureIndex(unittest.TestCase):
     """Unit-index selection.
 
-    NOTE: the happy path is not covered here. `feature_index` files are struct
-    .mat files, which the current reader (_mat_v73.loadmat_key) cannot load --
-    it handles dense arrays only, so a struct raises TypeError. That is a
-    pre-existing regression from the hdf5storage -> h5py read-path change
-    (issue #106), independent of the storage backends, and is left untouched
-    here rather than silently changed. Only the unambiguous case is asserted.
+    The index file is a struct (layer -> unit index) read by
+    `_mat_v73.load_struct`; the selected units are taken from the features
+    flattened to (n_samples, n_units) in C order.
     """
 
     def setUp(self):
         self.labels = ['img0001', 'img0002', 'img0003']
+        self.layers = ['fc8', 'conv5']
+        self.shapes = [(1, 20), (1, 4, 5)]
+        self.index = {'fc8': np.array([0, 5, 11, 19]),
+                      'conv5': np.array([2, 7, 13])}
         self.feature_dir = tempfile.TemporaryDirectory()
-        prepare_mat_features(
-            self.feature_dir.name, ['fc8'], self.labels, [(1, 20)]
+        self.stacked = prepare_mat_features(
+            self.feature_dir.name, self.layers, self.labels, self.shapes
         )
+        self.index_dir = tempfile.TemporaryDirectory()
 
     def tearDown(self):
         self.feature_dir.cleanup()
+        self.index_dir.cleanup()
+
+    def expected(self, layer):
+        """The features of `layer`, flattened and reduced to the indexed units."""
+        features = self.stacked[layer]
+        return features.reshape(features.shape[0], -1, order='C')[:, self.index[layer]]
+
+    def index_file(self, name='index.mat', **kwargs):
+        path = os.path.join(self.index_dir.name, name)
+        write_index_file(path, self.index, **kwargs)
+        return path
+
+    def test_get_selects_indexed_units(self):
+        feat = Features(self.feature_dir.name, feature_index=self.index_file())
+
+        for layer in self.layers:
+            # Each layer uses its own index, including the multi-dimensional
+            # conv5, whose feature axes are flattened first.
+            assert_array_equal(feat.get(layer), self.expected(layer))
+
+    def test_get_features_selects_indexed_units(self):
+        feat = Features(self.feature_dir.name, feature_index=self.index_file())
+
+        assert_array_equal(feat.get_features('fc8'), self.expected('fc8'))
+
+    def test_get_with_label_selects_indexed_units(self):
+        feat = Features(self.feature_dir.name, feature_index=self.index_file())
+
+        labels = [self.labels[2], self.labels[0]]
+        assert_array_equal(
+            feat.get('conv5', label=labels), self.expected('conv5')[[2, 0]]
+        )
+
+    def test_matlab_written_index_is_raveled(self):
+        # Without Python metadata the index reads back as a 2-D (1, n) row;
+        # using it unraveled would select a wrong (n_samples, 1, n) shape.
+        feat = Features(
+            self.feature_dir.name,
+            feature_index=self.index_file('index_matlab.mat', matlab_style=True))
+
+        selected = feat.get('fc8')
+        self.assertEqual(selected.shape, (len(self.labels), 4))
+        assert_array_equal(selected, self.expected('fc8'))
+        assert_array_equal(feat.feature_index, self.index['fc8'])
+
+    def test_v5_index_file_selects_indexed_units(self):
+        feat = Features(
+            self.feature_dir.name,
+            feature_index=self.index_file('index_v5.mat', format='5'))
+
+        assert_array_equal(feat.get('fc8'), self.expected('fc8'))
+
+    def test_iter_chunks_with_feature_index_raises(self):
+        # The index flattens the feature axes, so per-axis iteration has no
+        # meaning; the guard must stay.
+        feat = Features(self.feature_dir.name, feature_index=self.index_file())
+
+        with self.assertRaises(RuntimeError):
+            next(feat.iter_chunks('fc8', axis=1, size=2))
 
     def test_missing_index_file_raises(self):
         with self.assertRaises(RuntimeError):

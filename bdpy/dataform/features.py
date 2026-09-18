@@ -124,8 +124,9 @@ class Features(object):
         if feature_index is not None:
             if not os.path.exists(feature_index):
                 raise RuntimeError('%s do not exist' % feature_index)
-            self.__feat_index_table = _mat_v73.loadmat_key(feature_index, 'index')
-            # NOTE: type of self.__feature_index_table is ambiguous
+            # The index is a struct (layer -> unit array), which loadmat_key
+            # cannot read -- it handles dense arrays only.
+            self.__feat_index_table = _mat_v73.load_struct(feature_index, 'index')
         else:
             self.__feat_index_table = None
 
@@ -380,8 +381,11 @@ class Features(object):
     def __apply_feature_index(self, features: np.ndarray, layer: str) -> np.ndarray:
         if self.__feat_index_table is None:
             return features
-        # Select features by index
-        self.__feature_index = self.__feat_index_table[layer]
+        # Select features by index. The stored index is raveled because a
+        # struct written by MATLAB carries no Python.Shape, so it is read back
+        # as a 2-D (1, n) row vector, which would select a wrong (N, 1, n)
+        # shape here.
+        self.__feature_index = np.asarray(self.__feat_index_table[layer]).ravel()
         n_sample = features.shape[0]
         n_feat = np.array(features.shape[1:]).prod()
         return features.reshape([n_sample, n_feat], order='C')[:, self.__feature_index]
