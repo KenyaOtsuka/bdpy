@@ -44,7 +44,9 @@ def choose_chunk_shape(
 
     Within the budget the two chunked axes are split roughly evenly in element
     count, so that neither a sample-wise read nor a channel-wise read degenerates
-    into reading the entire dataset.
+    into reading the entire dataset. Each extent is then shrunk to the smallest
+    one needing the same number of chunks, which keeps HDF5 from padding the
+    edge chunks and inflating the file.
 
     Parameters
     ----------
@@ -70,9 +72,9 @@ def choose_chunk_shape(
     Examples
     --------
     >>> choose_chunk_shape((1200, 1000), np.dtype(np.float32))
-    (512, 512)
+    (400, 500)
     >>> choose_chunk_shape((1200, 256, 13, 13), np.dtype(np.float32))
-    (39, 39, 13, 13)
+    (39, 37, 13, 13)
     >>> choose_chunk_shape((50, 1000), np.dtype(np.float32))
     (50, 1000)
     """
@@ -105,4 +107,20 @@ def choose_chunk_shape(
         c0 = min(shape[0], c0)
     c1 = min(shape[1], max(c1, budget_cells // c0))
 
+    # HDF5 allocates whole chunks, so a chunk extent that divides its axis
+    # unevenly pads the edge chunks and inflates the file. Shrinking the extent
+    # to the smallest one that needs the same number of chunks removes most of
+    # that padding, and can only lower the chunk size, so the budget still holds.
+    c1 = _snap(shape[1], c1)
+    if n_samples_known:
+        c0 = _snap(shape[0], c0)
+
     return (c0, c1, *shape[2:])
+
+
+def _snap(length: int, chunk: int) -> int:
+    """Smallest extent covering `length` in the same number of chunks as `chunk`."""
+    if length < 1 or chunk >= length:
+        return chunk
+    n_chunks = -(-length // chunk)  # ceil
+    return -(-length // n_chunks)   # ceil

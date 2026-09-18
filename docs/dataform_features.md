@@ -156,7 +156,8 @@ read: HDF5 reads whole chunks even when only a few of their elements are
 selected. By default bdpy derives it from a 1 MiB budget, splitting it between
 the sample axis and the outermost feature axis and keeping trailing spatial axes
 whole -- e.g. `(1200, 256, 13, 13)` float32 becomes chunks of
-`(39, 39, 13, 13)`.
+`(39, 37, 13, 13)`. Extents are chosen to divide each axis as evenly as
+possible, so HDF5 does not pad the edge chunks.
 
 That means reading a *single* stimulus costs one chunk row (~39 stimuli of I/O),
 which matters for `FeaturesDataset`-style per-sample access. Tune it if your
@@ -168,8 +169,10 @@ save_features(path, array, labels, chunks=(1, 256, 13, 13))        # per-stimulu
 ```
 
 Compression is off by default, since every compressed chunk costs a
-decompression on the way out. Pass `compression='gzip'` or `compression='lzf'`
-when size matters more than read speed.
+decompression on the way out. Note that this makes the new format *larger* on
+disk than a legacy `.mat` tree, whose files `hdf5storage` compresses by default.
+Pass `compression='gzip'` or `compression='lzf'` when size matters more than
+read speed.
 
 ### Format
 

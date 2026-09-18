@@ -99,6 +99,18 @@ class TestChooseChunkShape(unittest.TestCase):
         )
         self.assertGreater(chunk[0], 1)
 
+    def test_edge_padding_is_small(self):
+        # HDF5 allocates whole chunks, so uneven extents pad the edges and
+        # inflate the file. Keep that overhead under 10%.
+        dtype = np.dtype(np.float32)
+        for shape in self.shapes:
+            chunk = choose_chunk_shape(shape, dtype)
+            allocated = 1
+            for s, c in zip(shape, chunk):
+                allocated *= -(-s // c) * c
+            with self.subTest(shape=shape):
+                self.assertLessEqual(allocated, int(np.prod(shape) * 1.1) + 1)
+
     def test_deterministic(self):
         shape = (1200, 256, 13, 13)
         dtype = np.dtype(np.float32)
