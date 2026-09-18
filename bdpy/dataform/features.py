@@ -309,14 +309,9 @@ class Features(object):
 
             self.__statistics.update({k: s})
 
-        if self.__feat_index_table is not None:
-            # Select features by index
-            self.__feature_index = self.__feat_index_table[layer]
-            assert isinstance(self.__features, np.ndarray)
-            n_sample = self.__features.shape[0]  # self.__features could be None
-            n_feat = np.array(self.__features.shape[1:]).prod()
-
-            s = s.reshape([n_sample, n_feat], order='C')[:, self.__feature_index]
+        # NOTE: the unit index is deliberately NOT applied here -- get() above
+        # already returns index-selected features, and re-applying it reshaped
+        # the statistic with another layer's dimensions and always failed.
 
         return s
 

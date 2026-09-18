@@ -283,6 +283,31 @@ class TestFeaturesFeatureIndex(unittest.TestCase):
 
         assert_array_equal(feat.get('fc8'), self.expected('fc8'))
 
+    def test_statistic_matches_value_computed_from_get(self):
+        # statistic() must not re-apply the index: get() already did, and
+        # re-applying it reshaped the statistic with another layer's dimensions
+        # and always raised ValueError.
+        feat = Features(self.feature_dir.name, feature_index=self.index_file())
+
+        for layer in self.layers:
+            selected = feat.get(layer)
+            assert_allclose(
+                feat.statistic('mean', layer),
+                np.mean(selected, axis=0)[np.newaxis, :])
+            assert_allclose(
+                feat.statistic('std', layer),
+                np.std(selected, axis=0, ddof=1)[np.newaxis, :])
+
+    def test_statistic_after_reading_another_layer(self):
+        # The old code took the reshape dimensions from the previously cached
+        # layer, so reading fc8 first broke the statistic of conv5.
+        feat = Features(self.feature_dir.name, feature_index=self.index_file())
+
+        feat.get('fc8')
+        assert_allclose(
+            feat.statistic('mean', 'conv5'),
+            np.mean(self.expected('conv5'), axis=0)[np.newaxis, :])
+
     def test_iter_chunks_with_feature_index_raises(self):
         # The index flattens the feature axes, so per-axis iteration has no
         # meaning; the guard must stay.
