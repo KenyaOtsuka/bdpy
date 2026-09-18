@@ -9,11 +9,19 @@ sparse-array struct). Saving still goes through hdf5storage.
 This file is a part of BdPy.
 """
 
+from typing import Dict, List
+
 import h5py
 import numpy as np
 import scipy.io as sio
 
-__all__ = ["load_array", "loadmat_key", "read_cell", "read_dataset"]
+__all__ = [
+    "load_array",
+    "load_struct",
+    "loadmat_key",
+    "read_cell",
+    "read_dataset",
+]
 
 
 def read_dataset(dset: h5py.Dataset) -> np.ndarray:
@@ -125,3 +133,102 @@ def loadmat_key(path: str, key: str) -> np.ndarray:
     except (NotImplementedError, ValueError):
         return load_array(path, key)
     return np.asarray(array)
+
+
+def _struct_field_names(group: h5py.Group) -> List[str]:
+    """Return the field names of a struct group, in their original order.
+
+    hdf5storage records the order the fields were written in as the
+    ``Python.Fields`` attribute; h5py itself iterates members alphabetically, so
+    without it the original order is lost. Files written by other tools (e.g.
+    MATLAB) carry no such attribute and fall back to the file's member order.
+    """
+    fields = group.attrs.get("Python.Fields")
+    if fields is None:
+        return list(group.keys())
+    return [
+        name.decode() if isinstance(name, bytes) else str(name) for name in fields
+    ]
+
+
+def _load_struct_v73(path: str, key: str) -> Dict[str, np.ndarray]:
+    """Read a struct variable from a v7.3 ``.mat`` file with h5py."""
+    with h5py.File(path, "r") as f:
+        group = f[key]
+        if not isinstance(group, h5py.Group):
+            raise TypeError(
+                "'%s' in %s is not a struct (got %s)"
+                % (key, path, type(group).__name__)
+            )
+        struct = {}
+        for name in _struct_field_names(group):
+            member = group[name]
+            if not isinstance(member, h5py.Dataset):
+                raise TypeError(
+                    "field '%s' of '%s' in %s is not an array (got %s); nested "
+                    "structs are not supported"
+                    % (name, key, path, type(member).__name__)
+                )
+            struct[name] = read_dataset(member)
+        return struct
+
+
+def _unwrap_object_array(value: np.ndarray) -> np.ndarray:
+    """Peel the object-array nesting scipy wraps v5 struct fields in.
+
+    ``scipy.io.loadmat`` returns each field of a struct as a size-1 object array
+    holding the actual data, sometimes nested more than once, so unwrap until a
+    real array is reached.
+    """
+    array = np.asarray(value)
+    while array.dtype == object and array.size == 1:
+        array = np.asarray(array.item())
+    return array
+
+
+def _struct_from_v5(variable: np.ndarray, path: str, key: str) -> Dict[str, np.ndarray]:
+    """Convert the structured array scipy returns for a v5 struct to a dict."""
+    array = np.asarray(variable)
+    names = array.dtype.names
+    if names is None:
+        raise TypeError("'%s' in %s is not a struct" % (key, path))
+    return {name: _unwrap_object_array(array[name]) for name in names}
+
+
+def load_struct(path: str, key: str) -> Dict[str, np.ndarray]:
+    """Load a MATLAB struct / Python dict variable as a dict of arrays.
+
+    :func:`loadmat_key` handles dense numeric arrays only; a struct is stored as
+    an ``h5py.Group`` (v7.3) or a structured array (v5), neither of which it can
+    read. This is the struct counterpart, used for e.g. the per-layer unit index
+    of :class:`bdpy.dataform.Features`. It reproduces what
+    ``hdf5storage.loadmat`` used to return before hdf5storage was dropped from
+    the load path (it breaks under NumPy 2.0, see issue #106).
+
+    The field arrays are returned exactly as stored. In particular, a struct
+    written by MATLAB carries no ``Python.Shape``, so :func:`read_dataset`
+    applies the MATLAB transpose and a stored row vector comes back as a 2-D
+    ``(1, n)`` array; callers that need a flat index must ravel it themselves.
+
+    Parameters
+    ----------
+    path : str
+        Path to the ``.mat`` file.
+    key : str
+        Variable name to load.
+
+    Returns
+    -------
+    dict of str to numpy.ndarray
+        One array per struct field, keyed by field name.
+
+    Raises
+    ------
+    TypeError
+        If ``key`` is not a struct, or has a field that is not an array.
+    """
+    try:
+        variable = sio.loadmat(path)[key]
+    except (NotImplementedError, ValueError):
+        return _load_struct_v73(path, key)
+    return _struct_from_v5(variable, path, key)
