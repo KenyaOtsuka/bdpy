@@ -473,13 +473,19 @@ class HDF5FeatureStore(FeatureStore):
                 return self._read_rows(dset, slice(None), indexers)
 
             rows = self._row_indices(labels)
+            if rows.size == dset.shape[0] and np.array_equal(
+                rows, np.arange(dset.shape[0])
+            ):
+                # Asking for every row in order: a plain slice reads
+                # contiguously, where a full index list would not.
+                return self._read_rows(dset, slice(None), indexers)
             # h5py wants a strictly increasing index list and allows at most one
             # fancy index per selection. Read each distinct row once in order,
             # then restore the caller's order (and any repeats) with `inverse`.
             uniq, inverse = np.unique(rows, return_inverse=True)
-            if uniq.size == len(rows) and np.array_equal(uniq, rows):
-                return self._read_rows(dset, list(uniq), indexers)
-            block = self._read_rows(dset, list(uniq), indexers)
+            block = self._read_rows(dset, [int(i) for i in uniq], indexers)
+            if uniq.size == rows.size and np.array_equal(uniq, rows):
+                return block
             return block[inverse]
 
     @staticmethod

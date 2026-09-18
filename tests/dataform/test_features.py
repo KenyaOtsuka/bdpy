@@ -13,13 +13,13 @@ from bdpy.dataform import _mat_v73
 from bdpy.dataform.features import Features, save_feature
 
 
-def _prepare_mock_data(
+def prepare_mat_features(
         tmpdir: str,
         mock_layer_names: List[str],
         mock_image_names: List[str],
         mock_shapes: List[Tuple[int, ...]]
     ) -> dict:
-    """Prepare mock data for testing.
+    """Write a legacy per-stimulus feature directory for testing.
 
     Files are written as MATLAB v7.3 (HDF5) so the loader's h5py path (used for
     NumPy 2.0 compatibility) is exercised. The stacked arrays are returned so
@@ -57,7 +57,7 @@ class TestDataformFeatures(unittest.TestCase):
         ]
         self.mock_shapes = [(1, 1000), (1, 256, 13, 13)]
         self.feature_dir = tempfile.TemporaryDirectory()
-        stacked = _prepare_mock_data(
+        stacked = prepare_mat_features(
             self.feature_dir.name,
             self.mock_layer_names,
             self.mock_image_names,
@@ -120,6 +120,96 @@ class TestDataformFeatures(unittest.TestCase):
             feat.get('conv5', label=labels),
             self.alexnet_conv5_all[index, :]
         )
+
+
+class TestFeaturesPartialRead(unittest.TestCase):
+    """feature_slice / iter_chunks on the legacy .mat backend.
+
+    The legacy layout cannot read partially, so these only check that the
+    result is the same as slicing a full read -- which is what makes the API
+    backend-independent.
+    """
+
+    def setUp(self):
+        self.layers = ['fc8', 'conv5']
+        self.labels = [
+            'n01443537_22563',
+            'n01443537_22564',
+            'n01677366_18182',
+            'n04572121_3262',
+        ]
+        self.shapes = [(1, 100), (1, 32, 5, 5)]
+        self.feature_dir = tempfile.TemporaryDirectory()
+        self.stacked = prepare_mat_features(
+            self.feature_dir.name, self.layers, self.labels, self.shapes
+        )
+
+    def tearDown(self):
+        self.feature_dir.cleanup()
+
+    def test_shape_without_reading(self):
+        feat = Features(self.feature_dir.name)
+        self.assertEqual(feat.shape('conv5'), self.stacked['conv5'].shape)
+        self.assertEqual(feat.shape('fc8'), self.stacked['fc8'].shape)
+
+    def test_feature_slice(self):
+        feat = Features(self.feature_dir.name)
+        assert_array_equal(
+            feat.get('conv5', feature_slice=np.s_[8:16]),
+            self.stacked['conv5'][:, 8:16],
+        )
+        assert_array_equal(
+            feat.get('fc8', feature_slice=np.s_[10:50]),
+            self.stacked['fc8'][:, 10:50],
+        )
+
+    def test_feature_slice_with_labels(self):
+        feat = Features(self.feature_dir.name)
+        labels = [self.labels[2], self.labels[0]]
+        assert_array_equal(
+            feat.get('conv5', label=labels, feature_slice=np.s_[8:16]),
+            self.stacked['conv5'][[2, 0]][:, 8:16],
+        )
+
+    def test_iter_chunks_reassembles(self):
+        feat = Features(self.feature_dir.name)
+        blocks = list(feat.iter_chunks('conv5', axis=1, size=7))
+        assert_array_equal(
+            np.concatenate([b for _, b in blocks], axis=1), self.stacked['conv5']
+        )
+
+    def test_unsliced_get_still_uses_the_layer_cache(self):
+        # The cache holds a whole layer; a sliced read must not replace it.
+        feat = Features(self.feature_dir.name)
+        cached = feat.get_features('conv5')
+        feat.get('conv5', feature_slice=np.s_[0:2])
+        self.assertIs(feat.get_features('conv5'), cached)
+
+
+class TestFeaturesFeatureIndex(unittest.TestCase):
+    """Unit-index selection.
+
+    NOTE: the happy path is not covered here. `feature_index` files are struct
+    .mat files, which the current reader (_mat_v73.loadmat_key) cannot load --
+    it handles dense arrays only, so a struct raises TypeError. That is a
+    pre-existing regression from the hdf5storage -> h5py read-path change
+    (issue #106), independent of the storage backends, and is left untouched
+    here rather than silently changed. Only the unambiguous case is asserted.
+    """
+
+    def setUp(self):
+        self.labels = ['img0001', 'img0002', 'img0003']
+        self.feature_dir = tempfile.TemporaryDirectory()
+        prepare_mat_features(
+            self.feature_dir.name, ['fc8'], self.labels, [(1, 20)]
+        )
+
+    def tearDown(self):
+        self.feature_dir.cleanup()
+
+    def test_missing_index_file_raises(self):
+        with self.assertRaises(RuntimeError):
+            Features(self.feature_dir.name, feature_index='/no/such/file.mat')
 
 
 class TestSaveFeature(unittest.TestCase):
