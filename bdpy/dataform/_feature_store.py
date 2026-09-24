@@ -420,8 +420,8 @@ class HDF5FeatureStore(FeatureStore):
         )
         if not self._layers:
             raise RuntimeError("No .{} feature file found in {}".format(HDF5_EXT, dpath))
-        self._labels: Optional[List[str]] = None
-        self._label_index: Optional[Dict[str, int]] = None
+        self._labels: List[str] = []
+        self._label_index: Dict[str, int] = {}
         self._validate_all()
 
     @property
@@ -430,12 +430,6 @@ class HDF5FeatureStore(FeatureStore):
 
     @property
     def labels(self) -> List[str]:
-        if self._labels is None:
-            with self._open(self._layers[0]) as f:
-                self._labels = _decode_labels(f[LABELS_DATASET][()])
-            self._label_index = {
-                label: i for i, label in enumerate(self._labels)
-            }
         return self._labels
 
     def path(self, layer: str) -> str:
@@ -506,8 +500,6 @@ class HDF5FeatureStore(FeatureStore):
         return np.asarray(dset[(rows, *indexers)])
 
     def _row_indices(self, labels: Sequence[str]) -> np.ndarray:
-        _ = self.labels  # populate the label -> row index map
-        assert self._label_index is not None
         try:
             return np.array([self._label_index[label] for label in labels], dtype=int)
         except KeyError as exc:
@@ -519,9 +511,32 @@ class HDF5FeatureStore(FeatureStore):
         return h5py.File(self.path(layer), "r")
 
     def _validate_all(self) -> None:
+        """Validate every layer file and pin down the shared label sequence.
+
+        A row index built from one layer is used against every layer's
+        ``/features``, so the layers must agree on the labels *and on their
+        order*; otherwise a label lookup would silently return another
+        stimulus' row. The legacy ``.mat`` backend enforces the same invariant
+        in :meth:`MatFeatureStore._collect_labels`.
+        """
+        reference: Optional[List[str]] = None
+        reference_layer = ""
         for layer in self._layers:
             with self._open(layer) as f:
                 _validate_format(f, self.path(layer))
+                labels = _decode_labels(f[LABELS_DATASET][()])
+            if reference is None:
+                reference, reference_layer = labels, layer
+            elif labels != reference:
+                raise RuntimeError(
+                    _label_mismatch_message(
+                        self._dpath, reference_layer, reference, layer, labels
+                    )
+                )
+
+        assert reference is not None  # self._layers is non-empty
+        self._labels = reference
+        self._label_index = {label: i for i, label in enumerate(reference)}
 
 
 def _validate_format(f: h5py.File, path: str) -> None:
@@ -546,6 +561,40 @@ def _validate_format(f: h5py.File, path: str) -> None:
     for name in (FEATURES_DATASET, LABELS_DATASET):
         if name not in f:
             raise RuntimeError("{} has no /{} dataset".format(path, name))
+
+
+def _label_mismatch_message(
+    dpath: str,
+    reference_layer: str,
+    reference: List[str],
+    layer: str,
+    labels: List[str],
+) -> str:
+    """Describe *how* two layers' label sequences differ, not just that they do."""
+    if len(labels) != len(reference):
+        detail = "{} has {} labels, {} has {}".format(
+            reference_layer, len(reference), layer, len(labels)
+        )
+    elif sorted(labels) == sorted(reference):
+        first = next(
+            i for i, (a, b) in enumerate(zip(reference, labels)) if a != b
+        )
+        detail = (
+            "same labels in a different order; first difference at index {}: "
+            "{} has {!r}, {} has {!r}".format(
+                first, reference_layer, reference[first], layer, labels[first]
+            )
+        )
+    else:
+        only_ref = sorted(set(reference) - set(labels))[:3]
+        only_this = sorted(set(labels) - set(reference))[:3]
+        detail = "different labels; only in {}: {}, only in {}: {}".format(
+            reference_layer, only_ref or "-", layer, only_this or "-"
+        )
+    return (
+        "Inconsistent labels across layers in {}: {}. Every layer must hold the "
+        "same stimulus labels in the same order.".format(dpath, detail)
+    )
 
 
 def _decode_labels(raw: np.ndarray) -> List[str]:

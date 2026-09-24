@@ -100,6 +100,11 @@ feat = features.get(
     feature_slice=np.s_[128:256],
 )
 
+# NOTE: feature_slice cannot be combined with a unit index (`feature_index`).
+# The index addresses the flattened full feature space, so applying it to an
+# already-sliced array would select the wrong units; the combination raises
+# ValueError instead.
+
 # Full shape without reading anything
 n_stimuli, *feature_shape = features.shape('conv5')
 ```
@@ -126,6 +131,14 @@ from bdpy.dataform import save_features
 save_features('features/conv5.h5', array, labels)
 ```
 
+Writing never clobbers: an existing file raises `FileExistsError` unless you pass
+`overwrite=True`. Writes are also atomic -- the file is built in a hidden
+`.<name>.<id>.partial` sibling and moved into place only once it is complete --
+so a failed write leaves nothing behind and can simply be re-run, and an
+overwrite keeps the old file readable until the moment it is replaced. (A
+process killed outright cannot clean up after itself, so a stray `.partial` file
+may be left for you to delete.)
+
 Or incrementally, which is what feature extraction needs since it produces one
 stimulus at a time:
 
@@ -148,6 +161,12 @@ convert_features_to_hdf5('/path/to/features_mat', '/path/to/features_h5')
 
 The converter reads through the same backend `Features` uses for the legacy
 layout, and streams in batches, so a layer is never held in memory in full.
+Existing `<layer>.h5` files are skipped unless `overwrite=True`, and a layer that
+fails to convert leaves no file behind, so re-running picks up where it stopped.
+
+All layers in a directory must hold the same stimulus labels in the same order;
+a mismatch is rejected when the directory is opened, as it is for the legacy
+layout.
 
 ### Chunk shape
 

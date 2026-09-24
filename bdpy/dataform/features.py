@@ -197,7 +197,26 @@ class Features(object):
         >>> features.get('conv5')                                  # doctest: +SKIP
         >>> features.get('conv5', label=['img0001', 'img0002'])     # doctest: +SKIP
         >>> features.get('conv5', feature_slice=np.s_[128:256])     # doctest: +SKIP
+
+        Raises
+        ------
+        ValueError
+            If `feature_slice` is combined with a unit index (`feature_index`).
+            The index addresses the flattened *full* feature space, so it is
+            meaningless against an already-sliced array.
         """
+        if feature_slice is not None and self.__feat_index_table is not None:
+            # The unit index addresses the flattened full feature space, while
+            # feature_slice has already narrowed it. Applying one to the other
+            # would silently select the wrong units (or raise IndexError),
+            # so refuse the combination instead of guessing.
+            raise ValueError(
+                'feature_slice cannot be combined with feature_index: the unit '
+                'index addresses the full feature space, not a slice of it. '
+                'Call get() without feature_slice and slice the result, or '
+                'construct Features without feature_index.'
+            )
+
         if label is None and feature_slice is None:
             return self.get_features(layer)
 
@@ -244,7 +263,7 @@ class Features(object):
 
         Raises
         ------
-        RuntimeError
+        ValueError
             If a unit index (`feature_index`) is in use, which flattens the
             feature axes and so has no meaningful per-axis iteration.
 
@@ -254,7 +273,7 @@ class Features(object):
         ...     out[:, sl] = transform(block)
         """
         if self.__feat_index_table is not None:
-            raise RuntimeError(
+            raise ValueError(
                 'iter_chunks is not supported together with feature_index, '
                 'which flattens the feature axes'
             )

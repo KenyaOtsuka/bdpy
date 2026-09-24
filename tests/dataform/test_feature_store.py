@@ -219,6 +219,75 @@ class TestPartialReads(_BackendPair):
         self.assertEqual(chunks[2:], shape[2:])  # spatial axes kept whole
 
 
+class TestCrossLayerLabelConsistency(unittest.TestCase):
+    """Every layer must hold the same labels in the same order.
+
+    A row index built from one layer is used against every layer's /features,
+    so a layer whose labels are ordered differently would make a label lookup
+    silently return another stimulus' row. The legacy .mat backend enforces the
+    same invariant, and the HDF5 backend must match it.
+    """
+
+    def setUp(self):
+        warnings.simplefilter('ignore', FutureWarning)
+        self.tmpdir = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.tmpdir.cleanup()
+
+    def _write(self, layer, labels, n_features=8):
+        data = np.random.rand(len(labels), n_features)
+        save_features(
+            os.path.join(self.tmpdir.name, layer + '.h5'), data, labels,
+            layer=layer,
+        )
+        return data
+
+    def test_consistent_layers_are_accepted(self):
+        self._write('conv5', LABELS)
+        self._write('fc8', LABELS)
+        self.assertEqual(Features(self.tmpdir.name).labels, LABELS)
+
+    def test_different_order_is_rejected(self):
+        self._write('conv5', LABELS)
+        self._write('fc8', list(reversed(LABELS)))
+        with self.assertRaises(RuntimeError) as ctx:
+            HDF5FeatureStore(self.tmpdir.name)
+        message = str(ctx.exception)
+        self.assertIn('different order', message)
+        self.assertIn('fc8', message)
+
+    def test_different_content_is_rejected(self):
+        self._write('conv5', LABELS)
+        self._write('fc8', ['other%04d' % i for i in range(len(LABELS))])
+        with self.assertRaises(RuntimeError) as ctx:
+            HDF5FeatureStore(self.tmpdir.name)
+        self.assertIn('different labels', str(ctx.exception))
+
+    def test_different_length_is_rejected(self):
+        self._write('conv5', LABELS)
+        self._write('fc8', LABELS[:-2])
+        with self.assertRaises(RuntimeError) as ctx:
+            HDF5FeatureStore(self.tmpdir.name)
+        self.assertIn('labels', str(ctx.exception))
+
+    def test_features_construction_also_rejects(self):
+        # The guard must fire through the public entry point too.
+        self._write('conv5', LABELS)
+        self._write('fc8', list(reversed(LABELS)))
+        with self.assertRaises(RuntimeError):
+            Features(self.tmpdir.name)
+
+    def test_legacy_backend_rejects_the_same_way(self):
+        # Parity with the .mat layout, which raises when layers disagree.
+        matdir = os.path.join(self.tmpdir.name, 'mat')
+        os.makedirs(matdir)
+        prepare_mat_features(matdir, ['conv5'], LABELS, [(1, 8)])
+        prepare_mat_features(matdir, ['fc8'], LABELS[:-2], [(1, 8)])
+        with self.assertRaises(RuntimeError):
+            Features(matdir)
+
+
 class TestFormatDetection(unittest.TestCase):
     def setUp(self):
         warnings.simplefilter('ignore', FutureWarning)

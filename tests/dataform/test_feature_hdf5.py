@@ -1,4 +1,7 @@
+import gc
+import glob
 import os
+import stat
 import tempfile
 import unittest
 import warnings
@@ -9,6 +12,7 @@ from numpy.testing import assert_array_equal
 
 from bdpy.dataform import Features
 from bdpy.dataform._feature_store import (
+    MatFeatureStore,
     FORMAT_ATTR,
     FORMAT_NAME,
     FORMAT_VERSION_ATTR,
@@ -22,6 +26,12 @@ from bdpy.dataform.feature_hdf5 import (
 )
 
 from .test_features import prepare_mat_features
+
+
+def _current_umask():
+    mask = os.umask(0)
+    os.umask(mask)
+    return mask
 
 
 class TestSaveFeatures(unittest.TestCase):
@@ -203,6 +213,216 @@ class TestConvertFeaturesToHDF5(unittest.TestCase):
         # Batching is an implementation detail; it must not affect the result.
         convert_features_to_hdf5(self.matdir, self.h5dir, batch_size=3)
         assert_array_equal(Features(self.h5dir).get('conv5'), self.stacked['conv5'])
+
+
+class TestAtomicWriteAndOverwrite(unittest.TestCase):
+    """A failed write must leave nothing behind, and must never clobber.
+
+    The converter treats an existing <layer>.h5 as finished and skips it, so a
+    half-written file published at the target path would make a truncated layer
+    permanent across re-runs.
+    """
+
+    def setUp(self):
+        warnings.simplefilter('ignore', FutureWarning)
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.matdir = os.path.join(self.tmpdir.name, 'mat')
+        self.h5dir = os.path.join(self.tmpdir.name, 'h5')
+        os.makedirs(self.matdir)
+        self.labels = ['img%04d' % i for i in range(10)]
+        self.stacked = prepare_mat_features(
+            self.matdir, ['conv5'], self.labels, [(1, 16, 3, 3)]
+        )
+        self.path = os.path.join(self.tmpdir.name, 'conv5.h5')
+        self.data = np.random.rand(10, 8).astype(np.float32)
+
+    def tearDown(self):
+        self.tmpdir.cleanup()
+
+    def _leftovers(self, directory):
+        return sorted(os.listdir(directory))
+
+    # --- overwrite guard -------------------------------------------------
+
+    def test_save_features_refuses_to_clobber(self):
+        save_features(self.path, self.data, self.labels)
+        with self.assertRaises(FileExistsError):
+            save_features(self.path, self.data * 2, self.labels)
+        # The original must be untouched.
+        assert_array_equal(
+            HDF5FeatureStore(self.tmpdir.name).read('conv5'), self.data
+        )
+
+    def test_save_features_overwrite_replaces(self):
+        save_features(self.path, self.data, self.labels)
+        save_features(self.path, self.data * 2, self.labels, overwrite=True)
+        assert_array_equal(
+            HDF5FeatureStore(self.tmpdir.name).read('conv5'), self.data * 2
+        )
+
+    def test_writer_refuses_to_clobber(self):
+        save_features(self.path, self.data, self.labels)
+        with self.assertRaises(FileExistsError):
+            FeatureWriter(self.path, (8,), np.float32)
+        assert_array_equal(
+            HDF5FeatureStore(self.tmpdir.name).read('conv5'), self.data
+        )
+
+    def test_writer_overwrite_replaces(self):
+        save_features(self.path, self.data, self.labels)
+        with FeatureWriter(self.path, (8,), np.float32, overwrite=True) as w:
+            w.extend(self.data * 3, self.labels)
+        assert_array_equal(
+            HDF5FeatureStore(self.tmpdir.name).read('conv5'), self.data * 3
+        )
+
+    # --- atomicity -------------------------------------------------------
+
+    def test_target_is_absent_until_close(self):
+        writer = FeatureWriter(self.path, (8,), np.float32)
+        writer.append(self.data[0], self.labels[0])
+        self.assertFalse(os.path.exists(self.path))
+        writer.close()
+        self.assertTrue(os.path.exists(self.path))
+
+    def test_abort_leaves_nothing(self):
+        writer = FeatureWriter(self.path, (8,), np.float32)
+        writer.append(self.data[0], self.labels[0])
+        writer.abort()
+        self.assertFalse(os.path.exists(self.path))
+        self.assertEqual(self._leftovers(self.tmpdir.name), ['mat'])
+
+    def test_context_manager_aborts_on_exception(self):
+        with self.assertRaises(ZeroDivisionError):
+            with FeatureWriter(self.path, (8,), np.float32) as writer:
+                writer.append(self.data[0], self.labels[0])
+                raise ZeroDivisionError
+        self.assertFalse(os.path.exists(self.path))
+        self.assertEqual(self._leftovers(self.tmpdir.name), ['mat'])
+
+    def test_close_and_abort_are_idempotent(self):
+        writer = FeatureWriter(self.path, (8,), np.float32)
+        writer.extend(self.data, self.labels)
+        writer.close()
+        writer.close()
+        writer.abort()  # must not delete the published file
+        self.assertTrue(os.path.exists(self.path))
+        assert_array_equal(
+            HDF5FeatureStore(self.tmpdir.name).read('conv5'), self.data
+        )
+
+    def test_failed_save_features_leaves_nothing(self):
+        # Mismatched labels raise after the target has been prepared.
+        with self.assertRaises(ValueError):
+            save_features(self.path, self.data, self.labels[:-1])
+        self.assertFalse(os.path.exists(self.path))
+        self.assertEqual(self._leftovers(self.tmpdir.name), ['mat'])
+
+    def test_published_file_is_group_readable(self):
+        # Staging must not tighten permissions: these files live on shared lab
+        # storage, and 0600 would lock collaborators out.
+        save_features(self.path, self.data, self.labels)
+        mode = stat.S_IMODE(os.stat(self.path).st_mode)
+        expected = 0o666 & ~_current_umask()
+        self.assertEqual(mode, expected)
+
+    def test_staging_file_is_not_mistaken_for_a_layer(self):
+        # A directory being written into is also a directory someone may read.
+        # The scratch file must be invisible to the *.h5 scan, or a concurrent
+        # reader would either invent a bogus layer or fail validation.
+        writer = FeatureWriter(os.path.join(self.h5dir, 'conv5.h5'), (8,), np.float32)
+        try:
+            writer.append(self.data[0], self.labels[0])
+            self.assertEqual(glob.glob(os.path.join(self.h5dir, '*.h5')), [])
+            with self.assertRaises(RuntimeError):
+                HDF5FeatureStore(self.h5dir)  # "no .h5 feature file found"
+        finally:
+            writer.abort()
+
+    def test_failed_overwrite_preserves_the_previous_file(self):
+        # The old file stays readable for the whole write and is swapped only at
+        # the end, so a failure mid-overwrite loses neither old nor new.
+        save_features(self.path, self.data, self.labels)
+        with self.assertRaises(ZeroDivisionError):
+            with FeatureWriter(self.path, (8,), np.float32, overwrite=True) as w:
+                w.extend(self.data * 9, self.labels)
+                raise ZeroDivisionError
+        assert_array_equal(
+            HDF5FeatureStore(self.tmpdir.name).read('conv5'), self.data
+        )
+
+    def test_dropped_writer_does_not_leak_a_scratch_file(self):
+        writer = FeatureWriter(self.path, (8,), np.float32)
+        writer.append(self.data[0], self.labels[0])
+        del writer
+        gc.collect()
+        self.assertEqual(self._leftovers(self.tmpdir.name), ['mat'])
+
+    def test_close_after_abort_is_refused(self):
+        # Silently doing nothing would let a caller believe it published.
+        writer = FeatureWriter(self.path, (8,), np.float32)
+        writer.abort()
+        with self.assertRaises(RuntimeError):
+            writer.close()
+        self.assertFalse(os.path.exists(self.path))
+
+    def test_zero_samples_round_trips(self):
+        # An empty layer is representable; refusing it would add a failure mode
+        # on the success path for something the caller can check themselves.
+        with FeatureWriter(self.path, (8,), np.float32):
+            pass
+        store = HDF5FeatureStore(self.tmpdir.name)
+        self.assertEqual(store.labels, [])
+        self.assertEqual(store.read('conv5').shape, (0, 8))
+
+    # --- the converter ---------------------------------------------------
+
+    def _fail_on_second_batch(self):
+        """Patch MatFeatureStore.read to blow up partway through a layer."""
+        original = MatFeatureStore.read
+        state = {'calls': 0}
+
+        def flaky(store, layer, labels=None, feature_slice=None):
+            state['calls'] += 1
+            if state['calls'] > 1:
+                raise OSError('simulated read failure')
+            return original(store, layer, labels, feature_slice)
+
+        return original, flaky
+
+    def test_failed_conversion_leaves_no_file(self):
+        original, flaky = self._fail_on_second_batch()
+        MatFeatureStore.read = flaky
+        try:
+            with self.assertRaises(OSError):
+                convert_features_to_hdf5(
+                    self.matdir, self.h5dir, batch_size=3
+                )
+        finally:
+            MatFeatureStore.read = original
+
+        out_path = os.path.join(self.h5dir, 'conv5.h5')
+        self.assertFalse(os.path.exists(out_path))
+        # No scratch file left behind either.
+        self.assertEqual(self._leftovers(self.h5dir), [])
+
+    def test_rerun_after_failure_succeeds(self):
+        # The regression this guards: a published partial file would be taken
+        # for a finished one by the skip check and never repaired.
+        original, flaky = self._fail_on_second_batch()
+        MatFeatureStore.read = flaky
+        try:
+            with self.assertRaises(OSError):
+                convert_features_to_hdf5(
+                    self.matdir, self.h5dir, batch_size=3
+                )
+        finally:
+            MatFeatureStore.read = original
+
+        convert_features_to_hdf5(self.matdir, self.h5dir, batch_size=3)
+        assert_array_equal(
+            Features(self.h5dir).get('conv5'), self.stacked['conv5']
+        )
 
 
 class TestFormatValidation(unittest.TestCase):

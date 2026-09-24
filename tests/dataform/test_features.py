@@ -200,12 +200,48 @@ class TestFeaturesFeatureIndex(unittest.TestCase):
     def setUp(self):
         self.labels = ['img0001', 'img0002', 'img0003']
         self.feature_dir = tempfile.TemporaryDirectory()
-        prepare_mat_features(
+        self.stacked = prepare_mat_features(
             self.feature_dir.name, ['fc8'], self.labels, [(1, 20)]
         )
 
     def tearDown(self):
         self.feature_dir.cleanup()
+
+    def _features_with_index(self):
+        """Features with a unit index installed.
+
+        NOTE: the index table is injected directly rather than loaded from a
+        file. Loading is broken on `dev` (struct .mat files are unreadable by
+        _mat_v73.loadmat_key) and fixing that is out of scope here, but the
+        guards below must still be covered.
+        """
+        feat = Features(self.feature_dir.name)
+        feat._Features__feat_index_table = {'fc8': np.array([0, 5, 11, 19])}
+        return feat
+
+    def test_feature_slice_with_feature_index_is_refused(self):
+        # The unit index addresses the flattened FULL feature space, so applying
+        # it to an already-sliced array would silently pick the wrong units.
+        feat = self._features_with_index()
+        with self.assertRaises(ValueError) as ctx:
+            feat.get('fc8', feature_slice=np.s_[0:10])
+        self.assertIn('feature_index', str(ctx.exception))
+
+        # ... including when labels are also given.
+        with self.assertRaises(ValueError):
+            feat.get('fc8', label=self.labels[0], feature_slice=np.s_[0:10])
+
+    def test_unsliced_get_still_works_with_feature_index(self):
+        # The guard must not break the supported path.
+        feat = self._features_with_index()
+        assert_array_equal(
+            feat.get('fc8'), self.stacked['fc8'][:, [0, 5, 11, 19]]
+        )
+
+    def test_iter_chunks_with_feature_index_is_refused(self):
+        feat = self._features_with_index()
+        with self.assertRaises(ValueError):
+            list(feat.iter_chunks('fc8'))
 
     def test_missing_index_file_raises(self):
         with self.assertRaises(RuntimeError):

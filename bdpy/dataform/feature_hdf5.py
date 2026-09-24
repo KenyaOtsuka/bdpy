@@ -45,6 +45,8 @@ Migrate an existing ``.mat`` tree::
 """
 
 import os
+import uuid
+import weakref
 from types import TracebackType
 from typing import Iterable, Optional, Sequence, Tuple, Type
 
@@ -85,6 +87,62 @@ def _write_header(f: h5py.File, layer: Optional[str]) -> None:
         f.attrs["layer"] = layer
 
 
+#: Suffix of the scratch file a write is staged in.
+_PARTIAL_SUFFIX = ".partial"
+#: Cap on the copied basename so the staged name stays inside NAME_MAX.
+_MAX_STEM = 64
+
+
+def _staging_path(path: str) -> str:
+    """Name a scratch file next to `path`, invisible to feature-directory scans.
+
+    The name is dotted and does not end in ``.h5``, so neither
+    ``glob('*.h5')`` in :class:`~bdpy.dataform._feature_store.HDF5FeatureStore`
+    nor :func:`~bdpy.dataform._feature_store.detect_format` picks it up as a
+    layer while a write is in flight. The random component lets two processes
+    stage the same layer without colliding.
+    """
+    directory, name = os.path.split(os.path.abspath(path))
+    return os.path.join(
+        directory,
+        ".{}.{}{}".format(name[:_MAX_STEM], uuid.uuid4().hex, _PARTIAL_SUFFIX),
+    )
+
+
+def _prepare_target(path: str, overwrite: bool) -> str:
+    """Refuse to clobber, then name a scratch file next to `path`.
+
+    Writing goes to a scratch file in the *same directory*, so the final
+    :func:`os.replace` is an atomic rename on the same filesystem: either the
+    finished file appears at `path`, or nothing does. A half-written file must
+    never be left where a reader -- or the converter's skip-if-exists check --
+    would take it for a complete one.
+
+    The caller opens the returned path with mode ``"x"``, which both creates it
+    exclusively and lets HDF5 apply the process umask, so published files keep
+    the permissions they had before staging existed.
+    """
+    if os.path.exists(path) and not overwrite:
+        raise FileExistsError(
+            "{} already exists. Pass overwrite=True to replace it.".format(path)
+        )
+    _makedirs_for(path)
+    return _staging_path(path)
+
+
+def _promote(tmp_path: str, path: str) -> None:
+    """Move the finished scratch file into place (atomic on one filesystem)."""
+    os.replace(tmp_path, path)
+
+
+def _discard(tmp_path: str) -> None:
+    """Remove the scratch file, ignoring an already-vanished one."""
+    try:
+        os.remove(tmp_path)
+    except OSError:
+        pass
+
+
 def save_features(
     path: str,
     features: np.ndarray,
@@ -94,13 +152,15 @@ def save_features(
     target_chunk_bytes: int = DEFAULT_TARGET_CHUNK_BYTES,
     compression: Optional[str] = None,
     dtype: Optional[np.dtype] = None,
+    overwrite: bool = False,
 ) -> None:
     """Write a whole layer to a chunked HDF5 feature file.
 
     Parameters
     ----------
     path : str
-        Output file. Overwritten if it exists.
+        Output file. An existing file is kept unless `overwrite` is True. The
+        write is atomic: on failure nothing is left at `path`.
     features : numpy.ndarray
         Feature array of shape ``(n_samples, *feature_shape)``.
     labels : sequence of str
@@ -117,12 +177,16 @@ def save_features(
         fast.
     dtype : numpy.dtype, optional
         Dtype to store. Defaults to the dtype of `features`.
+    overwrite : bool, optional
+        Replace an existing file at `path` (default: False).
 
     Raises
     ------
     ValueError
         If `labels` does not have one entry per sample, or `features` has fewer
         than two axes.
+    FileExistsError
+        If `path` exists and `overwrite` is False.
     """
     features = np.asarray(features)
     if features.ndim < 2:
@@ -144,16 +208,21 @@ def save_features(
     if layer is None:
         layer = os.path.splitext(os.path.basename(path))[0]
 
-    _makedirs_for(path)
-    with h5py.File(path, "w") as f:
-        _write_header(f, layer)
-        f.create_dataset(
-            FEATURES_DATASET,
-            data=features.astype(dtype, copy=False),
-            chunks=chunks,
-            compression=compression,
-        )
-        f.create_dataset(LABELS_DATASET, data=labels, dtype=_string_dtype())
+    tmp_path = _prepare_target(path, overwrite)
+    try:
+        with h5py.File(tmp_path, "x") as f:
+            _write_header(f, layer)
+            f.create_dataset(
+                FEATURES_DATASET,
+                data=features.astype(dtype, copy=False),
+                chunks=chunks,
+                compression=compression,
+            )
+            f.create_dataset(LABELS_DATASET, data=labels, dtype=_string_dtype())
+    except BaseException:
+        _discard(tmp_path)
+        raise
+    _promote(tmp_path, path)
 
 
 class FeatureWriter:
@@ -161,12 +230,18 @@ class FeatureWriter:
 
     Feature extraction produces one stimulus at a time, so the datasets are
     created resizable (``maxshape=(None, *feature_shape)``) and grown in blocks
-    as samples arrive. Use it as a context manager, or call :meth:`close`.
+    as samples arrive.
+
+    Writing goes to a temporary file next to `path`; :meth:`close` moves it into
+    place and :meth:`abort` throws it away, so a failed write leaves nothing at
+    `path`. **Prefer the context manager**, which aborts when the block raises --
+    a bare ``try/finally: writer.close()`` would publish a half-written file.
 
     Parameters
     ----------
     path : str
-        Output file. Overwritten if it exists.
+        Output file. An existing file is kept unless `overwrite` is True, and
+        nothing is written there until :meth:`close` succeeds.
     feature_shape : sequence of int
         Shape of a single sample's features, without the sample axis.
     dtype : numpy.dtype
@@ -181,6 +256,13 @@ class FeatureWriter:
         Per-chunk byte budget used when `chunks` is not given.
     compression : str, optional
         h5py compression filter. ``None`` (default) stores uncompressed.
+    overwrite : bool, optional
+        Replace an existing file at `path` (default: False).
+
+    Raises
+    ------
+    FileExistsError
+        If `path` exists and `overwrite` is False.
 
     Examples
     --------
@@ -198,6 +280,7 @@ class FeatureWriter:
         chunks: Optional[Tuple[int, ...]] = None,
         target_chunk_bytes: int = DEFAULT_TARGET_CHUNK_BYTES,
         compression: Optional[str] = None,
+        overwrite: bool = False,
     ):
         self._feature_shape = tuple(int(s) for s in feature_shape)
         if not self._feature_shape:
@@ -215,8 +298,18 @@ class FeatureWriter:
         if layer is None:
             layer = os.path.splitext(os.path.basename(path))[0]
 
-        _makedirs_for(path)
-        self._file: Optional[h5py.File] = h5py.File(path, "w")
+        # Fail before doing any work if the target is occupied, then write to
+        # a scratch file so `path` stays untouched until close() succeeds.
+        self._path = path
+        self._aborted = False
+        self._tmp_path: Optional[str] = _prepare_target(path, overwrite)
+        self._file: Optional[h5py.File] = h5py.File(self._tmp_path, "x")
+        # If the writer is dropped without close() or abort(), the scratch file
+        # would otherwise linger next to the output. weakref.finalize (rather
+        # than __del__) runs exactly once, is detachable at publish time, and
+        # closes over the path instead of the writer, so it can never resurrect
+        # the object or outlive a name it no longer owns.
+        self._finalizer = weakref.finalize(self, _discard, self._tmp_path)
         _write_header(self._file, layer)
         self._features = self._file.create_dataset(
             FEATURES_DATASET,
@@ -297,10 +390,47 @@ class FeatureWriter:
         self._n = new_n
 
     def close(self) -> None:
-        """Close the underlying file. Idempotent."""
+        """Finish the file and move it into place. Idempotent.
+
+        This is the commit: call it only once the data is complete, because it
+        publishes whatever has been written so far. To throw a partial file
+        away, call :meth:`abort` instead. ``try: ... finally: writer.close()``
+        is therefore wrong -- it would publish a truncated file -- so use the
+        writer as a context manager, which routes to :meth:`abort` when the
+        body raises.
+
+        Raises
+        ------
+        RuntimeError
+            If the writer was already aborted.
+        """
+        if self._aborted:
+            raise RuntimeError(
+                "FeatureWriter was aborted; nothing was written to {}".format(
+                    self._path
+                )
+            )
         if self._file is not None:
             self._file.close()
             self._file = None
+        if self._tmp_path is not None:
+            _promote(self._tmp_path, self._path)
+            self._tmp_path = None
+            self._finalizer.detach()  # the scratch file is now the output
+
+    def abort(self) -> None:
+        """Discard the partial file without touching the target path.
+
+        Idempotent, and a no-op once :meth:`close` has published the file --
+        it must never remove a published output.
+        """
+        if self._file is not None:
+            self._file.close()
+            self._file = None
+        if self._tmp_path is not None:
+            self._finalizer()  # runs _discard exactly once
+            self._tmp_path = None
+            self._aborted = True
 
     def __enter__(self) -> "FeatureWriter":
         """Enter the context manager."""
@@ -312,8 +442,13 @@ class FeatureWriter:
         exc: Optional[BaseException],
         tb: Optional[TracebackType],
     ) -> None:
-        """Close the file on leaving the context manager."""
-        self.close()
+        """Publish the file on success, discard it if the block raised."""
+        if self._tmp_path is None:
+            return  # the body already called close() or abort() itself
+        if exc_type is None:
+            self.close()
+        else:
+            self.abort()
 
 
 def convert_features_to_hdf5(
@@ -341,7 +476,8 @@ def convert_features_to_hdf5(
         Legacy directory, ``<src_dir>/<layer>/<label>.<ext>``.
     dst_dir : str
         Output directory; ``<dst_dir>/<layer>.h5`` is written per layer. Created
-        if missing.
+        if missing. Each layer is written atomically, so a failed conversion
+        leaves no file behind and can simply be re-run.
     layers : iterable of str, optional
         Layers to convert. Defaults to every layer found in `src_dir`.
     ext : str, optional
@@ -384,7 +520,11 @@ def convert_features_to_hdf5(
             continue
 
         full_shape = store.shape(layer)
-        writer = FeatureWriter(
+        # The context manager is load-bearing: if a batch fails, it discards the
+        # partial file instead of publishing it. A published partial file would
+        # be taken for a finished one by the skip check above, and the layer
+        # would stay silently truncated across re-runs.
+        with FeatureWriter(
             out_path,
             feature_shape=full_shape[1:],
             dtype=store.dtype(layer),
@@ -392,13 +532,11 @@ def convert_features_to_hdf5(
             n_samples=full_shape[0],
             target_chunk_bytes=target_chunk_bytes,
             compression=compression,
-        )
-        try:
+            overwrite=overwrite,
+        ) as writer:
             for start in range(0, len(all_labels), batch_size):
                 batch = all_labels[start:start + batch_size]
                 writer.extend(store.read(layer, batch), batch)
-        finally:
-            writer.close()
 
         if verbose:
             print("Saved {} ({} samples).".format(out_path, full_shape[0]))
