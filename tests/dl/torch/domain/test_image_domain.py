@@ -3,7 +3,6 @@
 import unittest
 import torch
 import numpy as np
-import warnings
 from bdpy.dl.torch.domain import image_domain as image_domain_module
 
 
@@ -144,9 +143,8 @@ class TestPILDomainWithExplicitCrop(unittest.TestCase):
     def test_receive(self):
         """Tests receive"""
         pdwe_domain = image_domain_module.PILDomainWithExplicitCrop()
-        with warnings.catch_warnings(record=True) as w:
+        with self.assertWarns(RuntimeWarning):
             received_image = pdwe_domain.receive(self.expected_transformed_image)
-        self.assertTrue(any(isinstance(warn.message, RuntimeWarning) for warn in w))
         torch.testing.assert_close(received_image, self.image)
 
 

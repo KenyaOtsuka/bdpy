@@ -1,10 +1,13 @@
 import unittest
 
+import os
 import pickle
 
 import numpy as np
 
 from bdpy.evals.metrics import profile_correlation, pattern_correlation, pairwise_identification
+
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "data")
 
 
 class TestMetrics(unittest.TestCase):
@@ -69,7 +72,7 @@ class TestMetrics(unittest.TestCase):
         self.assertEqual(pattern_correlation(x, y).shape, (10,))
 
     def test_2d(self):
-        with open('tests/data/testdata-2d.pkl.gz', 'rb') as f:
+        with open(os.path.join(DATA_DIR, 'testdata-2d.pkl.gz'), 'rb') as f:
             d = pickle.load(f)
         np.testing.assert_allclose(
             profile_correlation(d['x'], d['y']), d['r_prof'], rtol=1e-12, atol=1e-12
@@ -82,7 +85,7 @@ class TestMetrics(unittest.TestCase):
         )
 
     def test_2d_nan(self):
-        with open('tests/data/testdata-2d-nan.pkl.gz', 'rb') as f:
+        with open(os.path.join(DATA_DIR, 'testdata-2d-nan.pkl.gz'), 'rb') as f:
             d = pickle.load(f)
         # self.assertTrue(np.array_equal(
         #     profile_correlation(d['x'], d['y']),
