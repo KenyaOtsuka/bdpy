@@ -601,7 +601,7 @@ class TestCrossLayerLabelConsistency(unittest.TestCase):
         matdir = os.path.join(self.tmpdir.name, 'mat')
         os.makedirs(matdir)
         prepare_mat_features(matdir, ['conv5'], LABELS, [(1, 8)])
-        prepare_mat_features(matdir, ['fc8'], LABELS[:-2], [(1, 8)])
+        prepare_mat_features(matdir, ['fc8'], LABELS[:-2], [(1, 8)], seed=1)
         with self.assertRaises(RuntimeError):
             Features(matdir)
 

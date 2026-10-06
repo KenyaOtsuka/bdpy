@@ -17,14 +17,20 @@ def prepare_mat_features(
         tmpdir: str,
         mock_layer_names: List[str],
         mock_image_names: List[str],
-        mock_shapes: List[Tuple[int, ...]]
+        mock_shapes: List[Tuple[int, ...]],
+        seed: int = 0,
     ) -> dict:
     """Write a legacy per-stimulus feature directory for testing.
 
     Files are written as MATLAB v7.3 (HDF5) so the loader's h5py path (used for
     NumPy 2.0 compatibility) is exercised. The stacked arrays are returned so
     tests can compare against them without re-reading the files.
+
+    One generator is drawn from in order for the whole call, so every layer and
+    stimulus gets different values. Pass a different `seed` to each call when a
+    test builds more than one directory, so their data differ too.
     """
+    rng = np.random.default_rng(seed)
     stacked = {}
     for layer_name, shape in zip(mock_layer_names, mock_shapes):
         os.makedirs(os.path.join(tmpdir, layer_name))
@@ -32,7 +38,7 @@ def prepare_mat_features(
         # Stack in sorted-filename order to match Features.__get_labels, which
         # sorts the feature files when collecting labels.
         for image_name in sorted(mock_image_names):
-            data = np.random.rand(*shape)
+            data = rng.random(shape)
             hdf5storage.savemat(
                 os.path.join(tmpdir, layer_name, image_name + '.mat'),
                 {'feat': data},
@@ -55,7 +61,7 @@ class TestDataformFeatures(unittest.TestCase):
             'n04572121_3263',
             'n04572121_3264'
         ]
-        self.mock_shapes = [(1, 1000), (1, 256, 13, 13)]
+        self.mock_shapes = [(1, 10), (1, 4, 3, 3)]
         self.feature_dir = tempfile.TemporaryDirectory()
         stacked = prepare_mat_features(
             self.feature_dir.name,
@@ -253,7 +259,7 @@ class TestSaveFeature(unittest.TestCase):
         # save_feature writes a MATLAB-compatible v7.3 .mat file, a path that is
         # deprecated (it becomes bdpy-native plain HDF5 in a future release); it
         # must emit a FutureWarning while still writing a reloadable file.
-        feature = np.random.rand(1, 1000)
+        feature = np.random.default_rng(0).random((1, 10))
 
         with tempfile.TemporaryDirectory() as tmpdir:
             with self.assertWarns(FutureWarning):
