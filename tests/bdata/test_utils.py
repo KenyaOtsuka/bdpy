@@ -12,11 +12,12 @@ from bdpy.bdata.utils import vstack, metadata_equal
 class TestVstack(unittest.TestCase):
 
     def test_vstack(self):
-        x0_data = np.random.rand(10, 20)
-        x0_label = np.random.rand(10, 1)
+        rng = np.random.default_rng(0)
+        x0_data = rng.random((10, 20))
+        x0_label = rng.random((10, 1))
 
-        x1_data = np.random.rand(10, 20)
-        x1_label = np.random.rand(10, 1)
+        x1_data = rng.random((10, 20))
+        x1_label = rng.random((10, 1))
 
         bdata0 = BData()
         bdata0.add(x0_data,  'Data')
@@ -34,12 +35,13 @@ class TestVstack(unittest.TestCase):
                                       np.vstack([x0_label, x1_label]))
 
     def test_vstack_successive(self):
-        x0_data = np.random.rand(10, 20)
-        x0_label = np.random.rand(10, 1)
+        rng = np.random.default_rng(0)
+        x0_data = rng.random((10, 20))
+        x0_label = rng.random((10, 1))
         x0_run = np.arange(10).reshape(10, 1) + 1
 
-        x1_data = np.random.rand(10, 20)
-        x1_label = np.random.rand(10, 1)
+        x1_data = rng.random((10, 20))
+        x1_label = rng.random((10, 1))
         x1_run = np.arange(10).reshape(10, 1) + 1
 
         bdata0 = BData()
@@ -63,8 +65,9 @@ class TestVstack(unittest.TestCase):
                                                  x1_run + len(x0_run)]))
 
     def test_vstack_successive_none(self):
-        x0_data = np.random.rand(10, 20)
-        x1_data = np.random.rand(10, 20)
+        rng = np.random.default_rng(0)
+        x0_data = rng.random((10, 20))
+        x1_data = rng.random((10, 20))
 
         bdata0 = BData()
         bdata0.add(x0_data, 'Data')
@@ -78,24 +81,25 @@ class TestVstack(unittest.TestCase):
                                       np.vstack([x0_data, x1_data]))
 
     def test_vstack_minimal(self):
-        x0_data = np.random.rand(5, 10)
-        x0_label = np.random.rand(5, 1)
+        rng = np.random.default_rng(0)
+        x0_data = rng.random((5, 10))
+        x0_label = rng.random((5, 1))
 
-        x1_data = np.random.rand(5, 10)
-        x1_label = np.random.rand(5, 1)
+        x1_data = rng.random((5, 10))
+        x1_label = rng.random((5, 1))
 
         bdata0 = BData()
         bdata0.add(x0_data,  'Data')
         bdata0.add(x0_label, 'Label')
         bdata0.add_metadata('key shared', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, np.nan], 'Shared meta-data')
-        bdata0.add_metadata('key only in 0', np.random.rand(11), 'Meta-data only in bdata0')
+        bdata0.add_metadata('key only in 0', rng.random((11,)), 'Meta-data only in bdata0')
 
 
         bdata1 = BData()
         bdata1.add(x1_data, 'Data')
         bdata1.add(x1_label, 'Label')
         bdata1.add_metadata('key shared', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, np.nan], 'Shared meta-data')
-        bdata0.add_metadata('key only in 1', np.random.rand(11), 'Meta-data only in bdata1')
+        bdata0.add_metadata('key only in 1', rng.random((11,)), 'Meta-data only in bdata1')
 
         bdata_merged = vstack([bdata0, bdata1], metadata_merge='minimal')
 
@@ -109,8 +113,9 @@ class TestVstack(unittest.TestCase):
         self.assertFalse('key only in 1' in bdata_merged.metadata.key)
 
     def test_vstack_unknown_metadata_merge(self):
-        x0_data = np.random.rand(5, 10)
-        x1_data = np.random.rand(5, 10)
+        rng = np.random.default_rng(0)
+        x0_data = rng.random((5, 10))
+        x1_data = rng.random((5, 10))
 
         bdata0 = BData()
         bdata0.add(x0_data, 'Data')
@@ -122,13 +127,14 @@ class TestVstack(unittest.TestCase):
             vstack([bdata0, bdata1], metadata_merge='unknown')
 
     def test_vstack_vmap(self):
-        x0_data = np.random.rand(10, 20)
-        x0_label = np.random.permutation(np.arange(10)).reshape(10, 1) + 1
+        rng = np.random.default_rng(0)
+        x0_data = rng.random((10, 20))
+        x0_label = rng.permutation(np.arange(10)).reshape(10, 1) + 1
 
         x0_label_map = {k: 'label_%04d' % k for k in x0_label.flatten()}
 
-        x1_data = np.random.rand(10, 20)
-        x1_label = np.random.permutation(np.arange(10)).reshape(10, 1) + 1
+        x1_data = rng.random((10, 20))
+        x1_label = rng.permutation(np.arange(10)).reshape(10, 1) + 1
 
         x1_label_map = {k: 'label_%04d' % k for k in x1_label.flatten()}
 
@@ -154,13 +160,14 @@ class TestVstack(unittest.TestCase):
         assert bdata_merged.get_vmap('Label') == bdata0.get_vmap('Label')
 
     def test_vstack_vmap_merge_diff_vmap(self):
-        x0_data = np.random.rand(10, 20)
-        x0_label = np.random.permutation(np.arange(10)).reshape(10, 1) + 1
+        rng = np.random.default_rng(0)
+        x0_data = rng.random((10, 20))
+        x0_label = rng.permutation(np.arange(10)).reshape(10, 1) + 1
 
         x0_label_map = {k: 'label_%04d' % k for k in x0_label.flatten()}
 
-        x1_data = np.random.rand(10, 20)
-        x1_label = np.random.permutation(np.arange(10)).reshape(10, 1) + 11
+        x1_data = rng.random((10, 20))
+        x1_label = rng.permutation(np.arange(10)).reshape(10, 1) + 11
 
         x1_label_map = {k: 'label_%04d' % k for k in x1_label.flatten()}
 
@@ -188,13 +195,14 @@ class TestVstack(unittest.TestCase):
         assert bdata_merged.get_vmap('Label') == merged_vmap
 
     def test_vstack_vmap_inconsistent_vmap(self):
-        x0_data = np.random.rand(10, 20)
-        x0_label = np.random.permutation(np.arange(10)).reshape(10, 1) + 1
+        rng = np.random.default_rng(0)
+        x0_data = rng.random((10, 20))
+        x0_label = rng.permutation(np.arange(10)).reshape(10, 1) + 1
 
         x0_label_map = {k: 'label_%04d' % k for k in x0_label.flatten()}
 
-        x1_data = np.random.rand(10, 20)
-        x1_label = np.random.permutation(np.arange(10)).reshape(10, 1) + 1
+        x1_data = rng.random((10, 20))
+        x1_label = rng.permutation(np.arange(10)).reshape(10, 1) + 1
 
         x1_label_map = {k: 'label_%04d_diff' % k for k in x1_label.flatten()}
 

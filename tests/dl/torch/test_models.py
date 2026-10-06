@@ -104,7 +104,9 @@ class TestVGG19(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.input_shape = (1, 3, 224, 224)
-        cls.model = models.VGG19()
+        with torch.random.fork_rng(devices=[]):
+            torch.manual_seed(0)
+            cls.model = models.VGG19()
 
     def test_forward(self):
         x = torch.rand(self.input_shape, generator=torch.Generator().manual_seed(0))
@@ -124,7 +126,9 @@ class TestAlexNet(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.input_shape = (1, 3, 224, 224)
-        cls.model = models.AlexNet()
+        with torch.random.fork_rng(devices=[]):
+            torch.manual_seed(0)
+            cls.model = models.AlexNet()
 
     def test_forward(self):
         x = torch.rand(self.input_shape, generator=torch.Generator().manual_seed(0))
@@ -145,7 +149,9 @@ class TestAlexNetGenerator(unittest.TestCase):
     def setUpClass(cls):
         # A feature vector, not an image: 4096 is what defc7 expects.
         cls.input_shape = (1, 4096)
-        cls.model = models.AlexNetGenerator()
+        with torch.random.fork_rng(devices=[]):
+            torch.manual_seed(0)
+            cls.model = models.AlexNetGenerator()
 
     def test_forward(self):
         x = torch.rand(self.input_shape, generator=torch.Generator().manual_seed(0))

@@ -21,9 +21,10 @@ class TestBdata(unittest.TestCase):
 
     def test_add_get(self):
         '''Test for BData.add and get.'''
-        data_x = np.random.rand(5, 10)
-        data_y = np.random.rand(5, 8)
-        data_z = np.random.rand(5, 20)
+        rng = np.random.default_rng(0)
+        data_x = rng.random((5, 10))
+        data_y = rng.random((5, 8))
+        data_z = rng.random((5, 20))
 
         b = BData()
 
@@ -61,13 +62,14 @@ class TestBdata(unittest.TestCase):
     def test_metadata_add_get(self):
         '''Test for add/get_metadata.'''
 
-        data_x = np.random.rand(5, 10)
-        data_y = np.random.rand(5, 8)
+        rng = np.random.default_rng(0)
+        data_x = rng.random((5, 10))
+        data_y = rng.random((5, 8))
 
         n_col = data_x.shape[1] + data_y.shape[1]
 
-        metadata_a = np.random.rand(n_col)
-        metadata_b = np.random.rand(n_col)
+        metadata_a = rng.random((n_col,))
+        metadata_b = rng.random((n_col,))
 
         b = BData()
 
@@ -85,11 +87,12 @@ class TestBdata(unittest.TestCase):
     def test_metadata_add_get_where(self):
         '''Test for add/get_metadata with where option.'''
 
-        data_x = np.random.rand(5, 10)
-        data_y = np.random.rand(5, 8)
+        rng = np.random.default_rng(0)
+        data_x = rng.random((5, 10))
+        data_y = rng.random((5, 8))
 
-        metadata_a = np.random.rand(10)
-        metadata_b = np.random.rand(8)
+        metadata_a = rng.random((10,))
+        metadata_b = rng.random((8,))
 
         b = BData()
 
@@ -130,11 +133,12 @@ class TestBdata(unittest.TestCase):
     def test_set_metadatadescription_1(self):
         '''Test for set_metadatadescription.'''
 
-        data_x = np.random.rand(5, 10)
-        data_y = np.random.rand(5, 8)
+        rng = np.random.default_rng(0)
+        data_x = rng.random((5, 10))
+        data_y = rng.random((5, 8))
 
-        metadata_a = np.random.rand(10)
-        metadata_b = np.random.rand(8)
+        metadata_a = rng.random((10,))
+        metadata_b = rng.random((8,))
 
         b = BData()
         b.add(data_x, 'Data_X')
@@ -151,8 +155,9 @@ class TestBdata(unittest.TestCase):
     def test_select(self):
         '''Test for BData.select.'''
 
-        data_x = np.random.rand(5, 10)
-        data_y = np.random.rand(5, 5)
+        rng = np.random.default_rng(0)
+        data_x = rng.random((5, 10))
+        data_y = rng.random((5, 5))
 
         b = BData()
         b.add(data_x, 'Data_X')
@@ -330,8 +335,9 @@ class TestBdata(unittest.TestCase):
 
     # Tests for vmap
     def test_vmap_add_get(self):
+        rng = np.random.default_rng(0)
         bdata = BData()
-        bdata.add(np.random.rand(4, 3), 'MainData')
+        bdata.add(rng.random((4, 3)), 'MainData')
         bdata.add(np.arange(4) + 1, 'Label')
 
         label_map = {1: 'label-1',
@@ -348,8 +354,9 @@ class TestBdata(unittest.TestCase):
         np.testing.assert_array_equal(bdata.get_label('Label'), label)
 
     def test_vmap_add_same_map(self):
+        rng = np.random.default_rng(0)
         bdata = BData()
-        bdata.add(np.random.rand(4, 3), 'MainData')
+        bdata.add(rng.random((4, 3)), 'MainData')
         bdata.add(np.arange(4) + 1, 'Label')
 
         label_map = {1: 'label-1',
@@ -366,10 +373,11 @@ class TestBdata(unittest.TestCase):
         np.testing.assert_array_equal(bdata.get_label('Label'), label)
 
     def test_vmap_errorcases(self):
+        rng = np.random.default_rng(0)
         n_sample = 4
 
         bdata = BData()
-        bdata.add(np.random.rand(n_sample, 3), 'MainData')
+        bdata.add(rng.random((n_sample, 3)), 'MainData')
         bdata.add(np.arange(n_sample) + 1, 'Label')
 
         label_map = {(i + 1): 'label-%04d' % (i + 1) for i in range(n_sample)}
@@ -397,8 +405,9 @@ class TestBdata(unittest.TestCase):
             bdata.add_vmap('Label', label_map_inconsist)
 
     def test_vmap_add_unnecessary_vmap(self):
+        rng = np.random.default_rng(0)
         bdata = BData()
-        bdata.add(np.random.rand(4, 3), 'MainData')
+        bdata.add(rng.random((4, 3)), 'MainData')
         bdata.add(np.arange(4) + 1, 'Label')
 
         label_map = {1: 'label-1',
@@ -415,8 +424,9 @@ class TestBdata(unittest.TestCase):
         assert bdata.get_vmap('Label') == label_map_ture
 
     def test_vmap_add_insufficient_vmap(self):
+        rng = np.random.default_rng(0)
         bdata = BData()
-        bdata.add(np.random.rand(4, 3), 'MainData')
+        bdata.add(rng.random((4, 3)), 'MainData')
         bdata.add(np.arange(4) + 1, 'Label')
 
         label_map = {1: 'label-1',
@@ -427,8 +437,9 @@ class TestBdata(unittest.TestCase):
             bdata.add_vmap('Label', label_map)
 
     def test_vmap_add_invalid_name_vmap(self):
+        rng = np.random.default_rng(0)
         bdata = BData()
-        bdata.add(np.random.rand(4, 3), 'MainData')
+        bdata.add(rng.random((4, 3)), 'MainData')
         bdata.add(np.arange(4) + 1, 'Label')
 
         label_map = {1: 'label-1',

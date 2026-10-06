@@ -17,6 +17,7 @@ from bdpy.recon.torch.modules import generator as generator_module
 from bdpy.recon.torch.modules import latent as latent_module
 from bdpy.recon.torch.modules import critic as critic_module
 from bdpy.recon.torch.modules import optimizer as optimizer_module
+from ...._torch_seed import seed_torch
 
 
 class DummyFeatureInversionCallback(inversion_module.FeatureInversionCallback):
@@ -160,10 +161,12 @@ class DummyNNModuleLatent(latent_module.NNModuleLatent):
 class TestFeatureInversionTask(unittest.TestCase):
     """Tests for bdpy.recon.torch.task.inversion.FeatureInversionTask"""
     def setUp(self):
-        self.init_latent = torch.randn(1, 10)
+        seed_torch(self)
+        g = torch.Generator().manual_seed(0)
+        self.init_latent = torch.randn(1, 10, generator=g)
         self.target_feature =  {
-            'fc1': torch.randn(1, 32),
-            'fc2': torch.randn(1, 10)
+            'fc1': torch.randn(1, 32, generator=g),
+            'fc2': torch.randn(1, 10, generator=g)
         }
         self.encoder = encoder_module.SimpleEncoder(
             MLP(), ["fc1", "fc2"], domain=Zero2OneImageDomain()

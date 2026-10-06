@@ -7,6 +7,7 @@ import torch.nn as nn
 
 from bdpy.dl.torch.domain.image_domain import Zero2OneImageDomain
 from bdpy.recon.torch.modules import encoder as encoder_module
+from ...._torch_seed import seed_torch
 
 
 class MLP(nn.Module):
@@ -35,12 +36,13 @@ class TestBaseEncoder(unittest.TestCase):
     def test_call(self):
         """Test __call__."""
 
+        g = torch.Generator().manual_seed(0)
         class ReturnAsIsEncoder(encoder_module.BaseEncoder):
             def encode(self, images):
                 return {"image": images}
 
         encoder = ReturnAsIsEncoder()
-        images = torch.randn(1, 3, 64, 64)
+        images = torch.randn(1, 3, 64, 64, generator=g)
         features = encoder(images)
         self.assertDictEqual(features, {"image": images})
 
@@ -55,6 +57,7 @@ class TestNNModuleEncoder(unittest.TestCase):
     def test_call(self):
         """Test __call__."""
 
+        g = torch.Generator().manual_seed(0)
         class ReturnAsIsEncoder(encoder_module.NNModuleEncoder):
             def __init__(self) -> None:
                 super().__init__()
@@ -63,7 +66,7 @@ class TestNNModuleEncoder(unittest.TestCase):
 
         encoder = ReturnAsIsEncoder()
 
-        images = torch.randn(1, 3, 64, 64)
+        images = torch.randn(1, 3, 64, 64, generator=g)
         images.requires_grad = True
         features = encoder(images)
         self.assertIsInstance(features, dict)
@@ -75,13 +78,17 @@ class TestNNModuleEncoder(unittest.TestCase):
 
 class TestSimpleEncoder(unittest.TestCase):
     """Tests for bdpy.recon.torch.modules.encoder.SimpleEncoder."""
+    def setUp(self):
+        seed_torch(self)
+
 
     def test_call(self):
         """Test __call__."""
+        g = torch.Generator().manual_seed(0)
         encoder = encoder_module.SimpleEncoder(
             MLP(), ["fc1", "fc2"], domain=Zero2OneImageDomain()
         )
-        images = torch.randn(1, 3, 64, 64).clamp(0, 1)
+        images = torch.randn(1, 3, 64, 64, generator=g).clamp(0, 1)
         images.requires_grad = True
         features = encoder(images)
         self.assertIsInstance(features, dict)
@@ -94,9 +101,13 @@ class TestSimpleEncoder(unittest.TestCase):
 
 class TestBuildEncoder(unittest.TestCase):
     """Tests for bdpy.recon.torch.modules.encoder.build_encoder."""
+    def setUp(self):
+        seed_torch(self)
+
 
     def test_build_encoder(self):
         """Test build_encoder."""
+        g = torch.Generator().manual_seed(0)
         mlp = MLP()
         encoder_from_builder = encoder_module.build_encoder(
             feature_network=mlp,
@@ -107,7 +118,7 @@ class TestBuildEncoder(unittest.TestCase):
             mlp, ["fc1", "fc2"], domain=Zero2OneImageDomain()
         )
 
-        images = torch.randn(1, 3, 64, 64).clamp(0, 1)
+        images = torch.randn(1, 3, 64, 64, generator=g).clamp(0, 1)
         features_from_builder = encoder_from_builder(images)
         features = encoder(images)
         self.assertEqual(type(encoder_from_builder), type(encoder))

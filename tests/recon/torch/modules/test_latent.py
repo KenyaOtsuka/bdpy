@@ -4,6 +4,7 @@ from typing import Iterator
 import torch.nn as nn
 from functools import partial
 from bdpy.recon.torch.modules import latent as latent_module
+from ...._torch_seed import seed_torch
 
 
 class DummyLatent(latent_module.BaseLatent):
@@ -93,6 +94,7 @@ class TestNNModuleLatent(unittest.TestCase):
 class TestArbitraryLatent(unittest.TestCase):
     """Tests for bdpy.recon.torch.modules.latent.ArbitraryLatent."""
     def setUp(self):
+        seed_torch(self)
         self.latent = latent_module.ArbitraryLatent((1, 3, 64, 64), partial(nn.init.normal_, mean=0, std=1))
         self.latent_shape_expected = (1, 3, 64, 64)
         self.latent_value_expected = nn.Parameter(torch.tensor([0.0, 1.0, 2.0]))

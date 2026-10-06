@@ -8,9 +8,10 @@ from bdpy.feature import normalize_feature
 class TestUtilFeature(unittest.TestCase):
 
     def test_normalize_feature_1d(self):
-        feat = np.random.rand(4096)
-        feat_mean0 = np.random.rand(1, 1)
-        feat_std0 = np.random.rand(1, 1)
+        rng = np.random.default_rng(0)
+        feat = rng.random((4096,))
+        feat_mean0 = rng.random((1, 1))
+        feat_std0 = rng.random((1, 1))
 
         ddof = 1
 
@@ -74,9 +75,10 @@ class TestUtilFeature(unittest.TestCase):
         np.testing.assert_allclose(feat_test, feat_valid, rtol=1e-12, atol=1e-12)
 
     def test_normalize_feature_3d(self):
-        feat = np.random.rand(64, 16, 16)
-        feat_mean0 = np.random.rand(64, 1, 1)
-        feat_std0 = np.random.rand(64, 1, 1)
+        rng = np.random.default_rng(0)
+        feat = rng.random((64, 16, 16))
+        feat_mean0 = rng.random((64, 1, 1))
+        feat_std0 = rng.random((64, 1, 1))
 
         ddof = 1
 

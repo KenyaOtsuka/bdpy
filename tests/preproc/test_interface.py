@@ -15,7 +15,8 @@ class TestPreprocessorInterface(unittest.TestCase):
     def test_average_sample(cls):
         '''Test for average_sample'''
 
-        x = np.random.rand(10, 100)
+        rng = np.random.default_rng(0)
+        x = rng.random((10, 100))
         group = np.array([1, 1, 1, 1, 1, 2, 2, 2, 2, 2])
 
         exp_output_x = np.vstack((np.average(x[0:5, :], axis=0),
@@ -32,7 +33,8 @@ class TestPreprocessorInterface(unittest.TestCase):
     def test_detrend_sample_default(cls):
         '''Test for detrend_sample (default)'''
 
-        x = np.random.rand(20, 10)
+        rng = np.random.default_rng(0)
+        x = rng.random((20, 10))
         group = np.array([1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
                           2, 2, 2, 2, 2, 2, 2, 2, 2, 2])
 
@@ -49,7 +51,8 @@ class TestPreprocessorInterface(unittest.TestCase):
     def test_detrend_sample_nokeepmean(cls):
         '''Test for detrend_sample (keep_mean=False)'''
 
-        x = np.random.rand(20, 10)
+        rng = np.random.default_rng(0)
+        x = rng.random((20, 10))
         group = np.array([1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
                           2, 2, 2, 2, 2, 2, 2, 2, 2, 2])
 
@@ -65,7 +68,8 @@ class TestPreprocessorInterface(unittest.TestCase):
     def test_normalize_sample(cls):
         '''Test for normalize_sample (default)'''
 
-        x = np.random.rand(20, 10)
+        rng = np.random.default_rng(0)
+        x = rng.random((20, 10))
         group = np.array([1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
                           2, 2, 2, 2, 2, 2, 2, 2, 2, 2])
 

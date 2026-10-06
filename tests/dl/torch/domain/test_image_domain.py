@@ -9,11 +9,12 @@ from bdpy.dl.torch.domain import image_domain as image_domain_module
 class TestAffineDomain(unittest.TestCase):
     """Tests for bdpy.dl.torch.domain.image_domain.AffineDomain"""
     def setUp(self):
+        rng = np.random.default_rng(0)
         self.params = [
             {"center": 0.2, "scale": 0.5, "dim": 0},
             {"center": np.array([0.2, 0.3, 0.4]), "scale": np.array([0.5, 0.6, 0.7]), "dim": 1},
             {"center": np.array([[0.2, 0.3], [0.4, 0.5]]), "scale": np.array([[0.5, 0.6], [0.7, 0.8]]), "dim": 2},
-            {"center": np.random.randn(3, 4, 4) * 0.1, "scale": np.random.randn(3, 4, 4) * 0.1, "dim": 3},
+            {"center": rng.standard_normal((3, 4, 4)) * 0.1, "scale": rng.standard_normal((3, 4, 4)) * 0.1, "dim": 3},
         ]
 
     def test_instantiation(self):
@@ -26,8 +27,9 @@ class TestAffineDomain(unittest.TestCase):
 class TestScaledDomain(unittest.TestCase):
     """Tests for bdpy.dl.torch.domain.image_domain.ScaledDomain"""
     def setUp(self):
+        rng = np.random.default_rng(0)
         self.scale = 0.5
-        self.image = torch.from_numpy(np.random.randn(1, 3, 4, 4))
+        self.image = torch.from_numpy(rng.standard_normal((1, 3, 4, 4)))
 
     def test_instantiation(self):
         """Test instantiation."""
@@ -46,13 +48,14 @@ class TestScaledDomain(unittest.TestCase):
 class TestStandardizedDomain(unittest.TestCase):
     """Tests for bdpy.dl.torch.domain.image_domain.StandardizedDomain"""
     def setUp(self):
+        rng = np.random.default_rng(0)
         self.params = [
             {"center": 0.2, "scale": 0.5, "dim": 0},
             {"center": np.array([0.2, 0.3, 0.4]), "scale": np.array([0.5, 0.6, 0.7]), "dim": 1},
             {"center": np.array([[0.2, 0.3], [0.4, 0.5]]), "scale": np.array([[0.5, 0.6], [0.7, 0.8]]), "dim": 2},
-            {"center": np.random.randn(3, 4, 4) * 0.1, "scale": np.random.randn(3, 4, 4) * 0.1, "dim": 3},
+            {"center": rng.standard_normal((3, 4, 4)) * 0.1, "scale": rng.standard_normal((3, 4, 4)) * 0.1, "dim": 3},
         ]
-        self.image = torch.from_numpy(np.random.randn(1, 3, 4, 4))
+        self.image = torch.from_numpy(rng.standard_normal((1, 3, 4, 4)))
 
     def test_instantiation(self):
         """Test instantiation."""
@@ -112,7 +115,8 @@ class TestRGBDomain(unittest.TestCase):
     """Tests fot bdpy.dl.torch.domain.image_domain.BGRDomain"""
 
     def setUp(self):
-        self.bgr_image = torch.rand((1, 3, 32, 32))
+        g = torch.Generator().manual_seed(0)
+        self.bgr_image = torch.rand((1, 3, 32, 32), generator=g)
         self.rgb_image = self.bgr_image[:, [2, 1, 0], ...]
 
     def test_send(self):
@@ -131,7 +135,8 @@ class TestRGBDomain(unittest.TestCase):
 class TestPILDomainWithExplicitCrop(unittest.TestCase):
     """Tests fot bdpy.dl.torch.domain.image_domain.PILDomainWithExplicitCrop"""
     def setUp(self):
-        self.expected_transformed_image = torch.rand((1, 3, 32, 32))
+        g = torch.Generator().manual_seed(0)
+        self.expected_transformed_image = torch.rand((1, 3, 32, 32), generator=g)
         self.image = self.expected_transformed_image.permute(0, 2, 3, 1) * 255
 
     def test_send(self):
@@ -151,8 +156,9 @@ class TestPILDomainWithExplicitCrop(unittest.TestCase):
 class TestFixedResolutionDomain(unittest.TestCase):
     """Tests fot bdpy.dl.torch.domain.image_domain.FixedResolutionDomain"""
     def setUp(self):
+        g = torch.Generator().manual_seed(0)
         self.expected_received_image_size = (1, 3, 16, 16)
-        self.image =torch.rand((1, 3, 32, 32))
+        self.image =torch.rand((1, 3, 32, 32), generator=g)
 
     def test_send(self):
         """Test send"""

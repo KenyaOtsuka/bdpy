@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch.optim as optim
 from bdpy.recon.torch.modules import build_generator, ArbitraryLatent
 from bdpy.recon.torch.modules import build_optimizer_factory, build_scheduler_factory
+from ...._torch_seed import seed_torch
 
 
 class MLP(nn.Module):
@@ -23,6 +24,9 @@ class MLP(nn.Module):
 
 class TestBuildOptimizerFactory(unittest.TestCase):
     """Tests for bdpy.recon.torch.modules.optimizer.build_optimizer_factory"""
+    def setUp(self):
+        seed_torch(self)
+
 
     def test_build_optimizer_factory(self):
         generator = build_generator(MLP(64, 10))
@@ -67,6 +71,9 @@ class TestBuildOptimizerFactory(unittest.TestCase):
 
 class TestBuildSchedulerFactory(unittest.TestCase):
     """Tests for bdpy.recon.torch.modules.optimizer.build_scheduler_factory"""
+    def setUp(self):
+        seed_torch(self)
+
 
     def test_build_scheduler_factory(self):
         generator = build_generator(MLP(64, 10))

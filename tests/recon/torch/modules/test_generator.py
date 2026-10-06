@@ -9,6 +9,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 from bdpy.recon.torch.modules import generator as generator_module
+from ...._torch_seed import seed_torch
 
 
 class LinearGenerator(generator_module.NNModuleGenerator):
@@ -82,6 +83,7 @@ class TestBaseGenerator(unittest.TestCase):
     def test_call(self):
         """Test __call__."""
 
+        g = torch.Generator().manual_seed(0)
         class ReturnAsIsGenerator(generator_module.BaseGenerator):
             def generate(self, latent):
                 return latent
@@ -93,7 +95,7 @@ class TestBaseGenerator(unittest.TestCase):
                 return iter([])
 
         generator = ReturnAsIsGenerator()
-        latent = torch.randn(1, 3, 64, 64)
+        latent = torch.randn(1, 3, 64, 64, generator=g)
         generated_image = generator(latent)
         self.assertEqual(generated_image.shape, (1, 3, 64, 64))
 
@@ -103,6 +105,7 @@ class TestNNModuleGenerator(unittest.TestCase):
 
     def setUp(self):
         """Set up."""
+        seed_torch(self)
         self.generator = LinearGenerator()
 
     def test_instantiation(self):
@@ -111,7 +114,8 @@ class TestNNModuleGenerator(unittest.TestCase):
 
     def test_call(self):
         """Test __call__."""
-        latent = torch.randn(1, 64)
+        g = torch.Generator().manual_seed(0)
+        latent = torch.randn(1, 64, generator=g)
         generated_image = self.generator(latent)
         self.assertEqual(generated_image.shape, (1, 10))
         generated_image.sum().backward()
@@ -132,8 +136,9 @@ class TestBareGenerator(unittest.TestCase):
 
     def test_call(self):
         """Test __call__."""
+        g = torch.Generator().manual_seed(0)
         generator = generator_module.BareGenerator(activation=torch.sigmoid)
-        latent = torch.randn(1, 3, 64, 64)
+        latent = torch.randn(1, 3, 64, 64, generator=g)
         generated_image = generator(latent)
         self.assertEqual(generated_image.shape, (1, 3, 64, 64))
         torch.testing.assert_close(generated_image, torch.sigmoid(latent))
@@ -141,11 +146,15 @@ class TestBareGenerator(unittest.TestCase):
 
 class TestDNNGenerator(unittest.TestCase):
     """Tests for bdpy.recon.torch.modules.generator.DNNGenerator."""
+    def setUp(self):
+        seed_torch(self)
+
     def test_call(self):
         """Test __call__."""
+        g = torch.Generator().manual_seed(0)
         generator_network = LinearGenerator()
         generator = generator_module.DNNGenerator(generator_network)
-        latent = torch.randn(1, 64)
+        latent = torch.randn(1, 64, generator=g)
         generated_image = generator(latent)
         self.assertEqual(generated_image.shape, (1, 10))
         generated_image.sum().backward()
@@ -164,11 +173,15 @@ class TestDNNGenerator(unittest.TestCase):
 
 class TestFrozenGenerator(unittest.TestCase):
     """Tests for bdpy.recon.torch.modules.generator.FrozenGenerator."""
+    def setUp(self):
+        seed_torch(self)
+
     def test_call(self):
         """Test __call__."""
+        g = torch.Generator().manual_seed(0)
         generator_network = LinearGenerator()
         generator = generator_module.FrozenGenerator(generator_network)
-        latent = torch.randn(1, 64)
+        latent = torch.randn(1, 64, generator=g)
         generated_image = generator(latent)
         self.assertEqual(generated_image.shape, (1, 10))
         self.assertRaises(ValueError, optim.SGD, generator.parameters())
@@ -186,6 +199,9 @@ class TestFrozenGenerator(unittest.TestCase):
 
 class TestBuildGenerator(unittest.TestCase):
     """Tests for bdpy.recon.torch.modules.generator.build_generator."""
+    def setUp(self):
+        seed_torch(self)
+
     def test_build_generator(self):
         """Test build_generator."""
         generator_network = LinearGenerator()

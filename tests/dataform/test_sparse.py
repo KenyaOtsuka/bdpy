@@ -15,6 +15,7 @@ from bdpy.dataform.sparse import (
 class TestSparse(unittest.TestCase):
 
     def test_load_save_dense_array(self):
+        rng = np.random.default_rng(0)
         payloads = [
             [(10,), 'test_array_dense_ndim1.mat'],  # ndim = 1
             [(3, 2), 'test_array_dense_ndim2.mat'],  # ndim = 2
@@ -23,13 +24,14 @@ class TestSparse(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             for shape, fname in payloads:
-                original_data = np.random.rand(*shape)
+                original_data = rng.random(shape)
                 save_array(tmpdir + '/' + fname, original_data, key='testdata')
                 from_file = load_array(tmpdir + '/' + fname, key='testdata')
 
                 np.testing.assert_array_equal(original_data, from_file)
 
     def test_load_save_sparse_array(self):
+        rng = np.random.default_rng(0)
         payloads = [
             [(10,), 'test_array_sparse_ndim1.mat'],  # ndim = 1
             [(3, 2), 'test_array_sparse_ndim2.mat'],  # ndim = 2
@@ -38,7 +40,7 @@ class TestSparse(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             for shape, fname in payloads:
-                original_data = np.random.rand(*shape)
+                original_data = rng.random(shape)
                 original_data[original_data < 0.8] = 0
 
                 save_array(tmpdir + '/' + fname, original_data, key='testdata', sparse=True)
@@ -47,6 +49,7 @@ class TestSparse(unittest.TestCase):
                 np.testing.assert_array_equal(original_data, from_file)
 
     def test_sparse_save_preserves_other_variables_under_numpy2(self):
+        rng = np.random.default_rng(0)
         if int(np.__version__.split('.')[0]) < 2:
             self.skipTest('NumPy-2-only h5py writer')
 
@@ -56,7 +59,7 @@ class TestSparse(unittest.TestCase):
             with h5py.File(fname, 'w') as f:
                 f.create_dataset('other', data=np.array([1, 2, 3]))
 
-            original_data = np.random.rand(3, 2)
+            original_data = rng.random((3, 2))
             original_data[original_data < 0.8] = 0
 
             save_array(fname, original_data, key='data', sparse=True)
@@ -87,9 +90,10 @@ class TestSparse(unittest.TestCase):
         # The MATLAB-compatible dense write path is deprecated (it becomes
         # bdpy-native plain HDF5 in a future release); it must emit a
         # FutureWarning while still round-tripping unchanged.
+        rng = np.random.default_rng(0)
         with tempfile.TemporaryDirectory() as tmpdir:
             fname = os.path.join(tmpdir, 'dense.mat')
-            original_data = np.random.rand(3, 2)
+            original_data = rng.random((3, 2))
 
             with self.assertWarns(FutureWarning):
                 save_array(fname, original_data, key='testdata')
@@ -98,9 +102,10 @@ class TestSparse(unittest.TestCase):
             np.testing.assert_array_equal(original_data, from_file)
 
     def test_save_array_sparse_warns_future(self):
+        rng = np.random.default_rng(0)
         with tempfile.TemporaryDirectory() as tmpdir:
             fname = os.path.join(tmpdir, 'sparse.mat')
-            original_data = np.random.rand(3, 2)
+            original_data = rng.random((3, 2))
             original_data[original_data < 0.8] = 0
 
             with self.assertWarns(FutureWarning):
@@ -110,9 +115,10 @@ class TestSparse(unittest.TestCase):
             np.testing.assert_array_equal(original_data, from_file)
 
     def test_sparse_array_save_warns_future(self):
+        rng = np.random.default_rng(0)
         with tempfile.TemporaryDirectory() as tmpdir:
             fname = os.path.join(tmpdir, 'sparse_direct.mat')
-            original_data = np.random.rand(3, 2)
+            original_data = rng.random((3, 2))
             original_data[original_data < 0.8] = 0
 
             with self.assertWarns(FutureWarning):
@@ -122,11 +128,12 @@ class TestSparse(unittest.TestCase):
             np.testing.assert_array_equal(original_data, from_file)
 
     def test_save_multiarrays_warns_future(self):
+        rng = np.random.default_rng(0)
         with tempfile.TemporaryDirectory() as tmpdir:
             fname = os.path.join(tmpdir, 'multi.mat')
             arrays = {
-                'a': np.random.rand(3, 2),
-                'b': np.random.rand(4,),
+                'a': rng.random((3, 2)),
+                'b': rng.random((4,)),
             }
 
             with self.assertWarns(FutureWarning):

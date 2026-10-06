@@ -336,6 +336,7 @@ class TestIterChunks(_BackendPair):
         # The multi-store path does not go through FeatureStore.iter_chunks, so
         # it used to skip these checks entirely: size=-1 yielded nothing and a
         # bad axis raised IndexError instead of ValueError.
+        rng = np.random.default_rng(0)
         other_dir = tempfile.TemporaryDirectory()
         self.addCleanup(other_dir.cleanup)
         other = other_dir.name
@@ -343,7 +344,7 @@ class TestIterChunks(_BackendPair):
         for layer, shape in zip(LAYERS, SHAPES):
             save_features(
                 os.path.join(other, layer + '.h5'),
-                np.random.rand(len(other_labels), *shape[1:]),
+                rng.random((len(other_labels), *shape[1:])),
                 other_labels,
             )
         spread = Features([self.h5dir, other])
@@ -552,12 +553,14 @@ class TestCrossLayerLabelConsistency(unittest.TestCase):
 
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
+        # One generator per test, so each layer written gets different data.
+        self.rng = np.random.default_rng(0)
 
     def tearDown(self):
         self.tmpdir.cleanup()
 
     def _write(self, layer, labels, n_features=8):
-        data = np.random.rand(len(labels), n_features)
+        data = self.rng.random((len(labels), n_features))
         save_features(os.path.join(self.tmpdir.name, layer + '.h5'), data, labels)
         return data
 
@@ -654,11 +657,12 @@ class TestFormatDetection(unittest.TestCase):
 
     def test_mixed_directories(self):
         # One dpath per layout, read through a single Features.
+        rng = np.random.default_rng(0)
         h5_only = os.path.join(self.tmpdir.name, 'h5b')
         os.makedirs(h5_only)
         other_labels = ['other%04d' % i for i in range(4)]
         for layer, shape in zip(LAYERS, SHAPES):
-            data = np.random.rand(len(other_labels), *shape[1:])
+            data = rng.random((len(other_labels), *shape[1:]))
             save_features(
                 os.path.join(h5_only, layer + '.h5'), data, other_labels
             )

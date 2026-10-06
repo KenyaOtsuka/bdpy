@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 
 from bdpy.dl.torch import torch as bdtorch
+from ..._torch_seed import seed_torch
 
 
 class MockInnerModule(nn.Module):
@@ -39,8 +40,10 @@ class MockModule(nn.Module):
 
 class TestFeatureExtractor(unittest.TestCase):
     def setUp(self) -> None:
+        seed_torch(self)
+        rng = np.random.default_rng(0)
         self.encoder = MockModule()
-        self.input_tensor = np.random.random(size=(10,)).astype(np.float32)
+        self.input_tensor = rng.random(size=(10,)).astype(np.float32)
         self.layer_list = [
             {'map': {'alias': 'L1', 'entity': 'layer1'}, 'shape': (1, 1)},
             {'map': {'alias': 'L2', 'entity': 'layers[0]'}, 'shape': (1, 2)},

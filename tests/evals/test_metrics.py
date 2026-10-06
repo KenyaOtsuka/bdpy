@@ -13,9 +13,10 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "
 class TestMetrics(unittest.TestCase):
     def test_profile_correlation(self):
         # 2-d array
+        rng = np.random.default_rng(0)
         n = 30
-        x = np.random.rand(10, n)
-        y = np.random.rand(10, n)
+        x = rng.random((10, n))
+        y = rng.random((10, n))
         r = np.array([[
             np.corrcoef(x[:, i], y[:, i])[0, 1]
             for i in range(n)
@@ -27,8 +28,8 @@ class TestMetrics(unittest.TestCase):
         self.assertEqual(profile_correlation(x, y).shape, (1, n))
 
         # Multi-d array
-        x = np.random.rand(10, 4, 3, 2)
-        y = np.random.rand(10, 4, 3, 2)
+        x = rng.random((10, 4, 3, 2))
+        y = rng.random((10, 4, 3, 2))
         xf = x.reshape(10, -1)
         yf = y.reshape(10, -1)
         r = np.array([[
@@ -44,8 +45,9 @@ class TestMetrics(unittest.TestCase):
 
     def test_pattern_correlation(self):
         # 2-d array
-        x = np.random.rand(10, 30)
-        y = np.random.rand(10, 30)
+        rng = np.random.default_rng(0)
+        x = rng.random((10, 30))
+        y = rng.random((10, 30))
         r = np.array([
             np.corrcoef(x[i, :], y[i, :])[0, 1]
             for i in range(10)
@@ -57,8 +59,8 @@ class TestMetrics(unittest.TestCase):
         self.assertEqual(pattern_correlation(x, y).shape, (10,))
 
         # Multi-d array
-        x = np.random.rand(10, 4, 3, 2)
-        y = np.random.rand(10, 4, 3, 2)
+        x = rng.random((10, 4, 3, 2))
+        y = rng.random((10, 4, 3, 2))
         xf = x.reshape(10, -1)
         yf = y.reshape(10, -1)
         r = np.array([
