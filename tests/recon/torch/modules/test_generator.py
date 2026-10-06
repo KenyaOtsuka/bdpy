@@ -7,7 +7,6 @@ import copy
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torchvision.models import get_model
 
 from bdpy.recon.torch.modules import generator as generator_module
 
@@ -25,50 +24,52 @@ class LinearGenerator(generator_module.NNModuleGenerator):
 
 
 class TestCallResetParameters(unittest.TestCase):
-    """Tests for bdpy.recon.torch.modules.generator.call_reset_parameters."""
-    def setUp(self):
-        self.model_ids = [
-            "alexnet",
-            "efficientnet_b0",
-            "fasterrcnn_resnet50_fpn",
-            "inception_v3",
-            "resnet18",
-            "vgg11",
-            "vit_b_16",
-        ]
-        # NOTE: The following modules are excluded from validation because they
-        #       initialize their parameters as constants every time.
-        self.excluded_modules = [
-            nn.modules.batchnorm._BatchNorm,
-            nn.LayerNorm,
-        ]
+    """Tests for bdpy.recon.torch.modules.generator.call_reset_parameters.
 
-    def _validate_module(self, module: nn.Module, module_copy: nn.Module, parent_name: str = ""):
-        if isinstance(module, tuple(self.excluded_modules)):
-            return
-        for (name_p1, p1), (_, p2) in zip(module.named_parameters(recurse=False), module_copy.named_parameters(recurse=False)):
-            # NOTE: skip parameters that are prbably not randomly initialized
-            if "weight" not in name_p1:
+    The layer types below are the only parameterised ones used by the models
+    bdpy ships (bdpy.dl.torch.models), plus nn.MultiheadAttention for the
+    `_reset_parameters` branch. Seeding happens once per test, before the
+    module is built, so construction and reset draw different numbers.
+    """
+
+    def _assert_weights_reset(self, build):
+        with torch.random.fork_rng(devices=[]):
+            torch.manual_seed(0)
+            module = build()
+            before = copy.deepcopy(module)
+            with self.assertWarns(UserWarning):
+                module.apply(generator_module.call_reset_parameters)
+        for (name, p1), (_, p2) in zip(module.named_parameters(), before.named_parameters()):
+            if "weight" not in name:
                 continue
-            self.assertFalse(
-                torch.equal(p1, p2),
-                msg=f"Parameter {parent_name}.{name_p1} does not change after calling reset_parameters."
-            )
-        for (name_m1, m1), (_, m2) in zip(module.named_children(), module_copy.named_children()):
-            self._validate_module(m1, m2, f"{parent_name}.{name_m1}")
+            self.assertFalse(torch.equal(p1, p2), msg=f"{name} was not reset")
 
-    def test_call_reset_parameters(self):
-        """Test call_reset_parameters."""
-        for model_id in self.model_ids:
-            model = get_model(model_id)
-            model_copy = copy.deepcopy(model)
-            for (name_p1, p1), (_, p2) in zip(model.named_parameters(), model_copy.named_parameters()):
-                self.assertTrue(
-                    torch.equal(p1, p2),
-                    msg=f"Parameter {name_p1} of {model_id} has been changed by deepcopy."
-                )
-            model.apply(generator_module.call_reset_parameters)
-            self._validate_module(model, model_copy, model_id)
+    def test_resets_layers_with_reset_parameters(self):
+        builders = {
+            "Conv2d": lambda: nn.Conv2d(2, 3, kernel_size=3),
+            "Linear": lambda: nn.Linear(4, 3),
+            "ConvTranspose2d": lambda: nn.ConvTranspose2d(2, 3, kernel_size=3),
+        }
+        for name, build in builders.items():
+            with self.subTest(layer=name):
+                self._assert_weights_reset(build)
+
+    def test_resets_layers_with_only_private_reset_parameters(self):
+        self.assertFalse(hasattr(nn.MultiheadAttention, "reset_parameters"))
+        self._assert_weights_reset(lambda: nn.MultiheadAttention(4, num_heads=2))
+
+    def test_ignores_modules_without_reset_method(self):
+        module = nn.ReLU()
+        with self.assertWarns(UserWarning):
+            generator_module.call_reset_parameters(module)
+
+    def test_apply_reaches_nested_children(self):
+        self._assert_weights_reset(
+            lambda: nn.Sequential(
+                nn.Linear(4, 4),
+                nn.Sequential(nn.ReLU(), nn.Conv2d(1, 1, kernel_size=2)),
+            )
+        )
 
 
 class TestBaseGenerator(unittest.TestCase):
