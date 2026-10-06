@@ -24,9 +24,10 @@ def _make_id(key: str) -> str:
 class TestModelTraining(unittest.TestCase):
     def setUp(self) -> None:
         self.results_dir_root = tempfile.TemporaryDirectory()
-        self.X = np.random.rand(100, 500)
-        self.Y1dim = np.random.rand(100, 50)
-        self.Y4dim = np.random.rand(100, 8, 4, 4)
+        rng = np.random.default_rng(0)
+        self.X = rng.random((8, 6))
+        self.Y1dim = rng.random((8, 3))
+        self.Y4dim = rng.random((8, 2, 2, 2))
 
     def tearDown(self) -> None:
         self.results_dir_root.cleanup()
@@ -52,7 +53,7 @@ class TestModelTraining(unittest.TestCase):
 
         key = 'fastl2lir-nochunk'
         model = FastL2LiR()
-        model_parameters = {'alpha': 100, 'n_feat': 100}
+        model_parameters = {'alpha': 100, 'n_feat': 3}
 
         train = ModelTraining(model, X, Y)
         train.id = _make_id(key)
@@ -69,7 +70,7 @@ class TestModelTraining(unittest.TestCase):
 
         key = 'fastl2lir-nochunk-bdmodel'
         model = FastL2LiR()
-        model_parameters = {'alpha': 100, 'n_feat': 100}
+        model_parameters = {'alpha': 100, 'n_feat': 3}
 
         train = ModelTraining(model, X, Y)
         train.id = _make_id(key)
@@ -86,8 +87,8 @@ class TestModelTraining(unittest.TestCase):
         W = load_array(os.path.join(train.save_path, 'W.mat'), key='W')
         b = load_array(os.path.join(train.save_path, 'b.mat'), key='b')
 
-        self.assertEqual(W.shape, (500, 50))
-        self.assertEqual(b.shape, (1, 50))
+        self.assertEqual(W.shape, (6, 3))
+        self.assertEqual(b.shape, (1, 3))
 
     def test_fastl2lir_bdmodel_chunk(self):
         X = self.X
@@ -95,7 +96,7 @@ class TestModelTraining(unittest.TestCase):
 
         key = 'fastl2lir-chunk-bdmodel'
         model = FastL2LiR()
-        model_parameters = {'alpha': 100, 'n_feat': 100}
+        model_parameters = {'alpha': 100, 'n_feat': 3}
 
         train = ModelTraining(model, X, Y)
         train.id = _make_id(key)
@@ -114,16 +115,16 @@ class TestModelTraining(unittest.TestCase):
             W = load_array(os.path.join(train.save_path, 'W', '%08d.mat' % i), key='W')
             b = load_array(os.path.join(train.save_path, 'b', '%08d.mat' % i), key='b')
 
-            self.assertEqual(W.shape, (500, 1, 4, 4))
-            self.assertEqual(b.shape, (1, 1, 4, 4))
+            self.assertEqual(W.shape, (6, 1, 2, 2))
+            self.assertEqual(b.shape, (1, 1, 2, 2))
 
 
 class TestModelTest(unittest.TestCase):
     def setUp(self) -> None:
         self.test_models_path = os.path.abspath(os.path.join(
             os.path.dirname(__file__), os.pardir, 'data', 'test_models'))
-        self.X = np.random.rand(30, 500)
-        self.batch_shape = (30,)
+        # Matches the fixtures written by tests/data/test_models/make_test_models.py.
+        self.X = np.random.default_rng(0).random((3, 6))
 
     def test_sklearn_nochunk_pkl(self):
         key = 'lir-nochunk-pkl'
@@ -135,7 +136,7 @@ class TestModelTest(unittest.TestCase):
 
         test = ModelTest(model, X)
         y_pred = test.run()
-        self.assertEqual(y_pred.shape, (30, 50))
+        self.assertEqual(y_pred.shape, (3, 3))
 
     def test_sklearn_nochunk_pkl_modelpath(self):
         key = 'lir-nochunk-pkl'
@@ -147,7 +148,7 @@ class TestModelTest(unittest.TestCase):
         test = ModelTest(model, X)
         test.model_path = model_path
         y_pred = test.run()
-        self.assertEqual(y_pred.shape, (30, 50))
+        self.assertEqual(y_pred.shape, (3, 3))
 
     def test_fastl2lir_nochunk_pkl_modelpath(self):
         key = 'fastl2lir-nochunk-pkl'
@@ -159,7 +160,7 @@ class TestModelTest(unittest.TestCase):
         test = ModelTest(model, X)
         test.model_path = model_path
         y_pred = test.run()
-        self.assertEqual(y_pred.shape, (30, 50))
+        self.assertEqual(y_pred.shape, (3, 3))
 
     def test_fastl2lir_chunk_pkl_modelpath(self):
         key = 'fastl2lir-chunk-pkl'
@@ -172,7 +173,7 @@ class TestModelTest(unittest.TestCase):
         test.model_path = model_path
         test.chunk_axis = 1
         y_pred = test.run()
-        self.assertEqual(y_pred.shape, (30, 8, 4, 4))
+        self.assertEqual(y_pred.shape, (3, 2, 2, 2))
 
     def test_fastl2lir_nochunk_bd_modelpath(self):
         key = 'fastl2lir-nochunk-bd'
@@ -185,7 +186,7 @@ class TestModelTest(unittest.TestCase):
         test.model_path = model_path
         test.model_format = 'bdmodel'
         y_pred = test.run()
-        self.assertEqual(y_pred.shape, (30, 50))
+        self.assertEqual(y_pred.shape, (3, 3))
 
     def test_fastl2lir_chunk_bd_modelpath(self):
         key = 'fastl2lir-chunk-bd'
@@ -199,7 +200,7 @@ class TestModelTest(unittest.TestCase):
         test.model_format = 'bdmodel'
         test.chunk_axis = 1
         y_pred = test.run()
-        self.assertEqual(y_pred.shape, (30, 8, 4, 4))
+        self.assertEqual(y_pred.shape, (3, 2, 2, 2))
 
 
 if __name__ == '__main__':
