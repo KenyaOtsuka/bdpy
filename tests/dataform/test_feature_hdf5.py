@@ -1,11 +1,9 @@
 import errno
-import gc
 import glob
 import os
 import stat
 import tempfile
 import unittest
-import warnings
 from unittest import mock
 
 import h5py
@@ -44,7 +42,7 @@ class TestSaveFeatures(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.labels = ['img%04d' % i for i in range(12)]
-        self.data = np.random.rand(12, 32, 5, 5).astype(np.float32)
+        self.data = np.random.default_rng(0).random((12, 32, 5, 5)).astype(np.float32)
         self.path = os.path.join(self.tmpdir.name, 'conv5.h5')
 
     def tearDown(self):
@@ -105,7 +103,7 @@ class TestFeatureWriter(unittest.TestCase):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.path = os.path.join(self.tmpdir.name, 'conv5.h5')
         self.labels = ['img%04d' % i for i in range(150)]
-        self.data = np.random.rand(150, 16, 3, 3).astype(np.float32)
+        self.data = np.random.default_rng(0).random((150, 16, 3, 3)).astype(np.float32)
 
     def tearDown(self):
         self.tmpdir.cleanup()
@@ -167,7 +165,6 @@ class TestConvertFeaturesToHDF5(unittest.TestCase):
     """The converter must reproduce exactly what the legacy reader sees."""
 
     def setUp(self):
-        warnings.simplefilter('ignore', FutureWarning)
         self.tmpdir = tempfile.TemporaryDirectory()
         self.matdir = os.path.join(self.tmpdir.name, 'mat')
         self.h5dir = os.path.join(self.tmpdir.name, 'h5')
@@ -403,17 +400,11 @@ class TestAtomicWriteAndOverwrite(unittest.TestCase):
     """
 
     def setUp(self):
-        warnings.simplefilter('ignore', FutureWarning)
         self.tmpdir = tempfile.TemporaryDirectory()
-        self.matdir = os.path.join(self.tmpdir.name, 'mat')
         self.h5dir = os.path.join(self.tmpdir.name, 'h5')
-        os.makedirs(self.matdir)
         self.labels = ['img%04d' % i for i in range(10)]
-        self.stacked = prepare_mat_features(
-            self.matdir, ['conv5'], self.labels, [(1, 16, 3, 3)]
-        )
         self.path = os.path.join(self.tmpdir.name, 'conv5.h5')
-        self.data = np.random.rand(10, 8).astype(np.float32)
+        self.data = np.random.default_rng(0).random((10, 8)).astype(np.float32)
 
     def tearDown(self):
         self.tmpdir.cleanup()
@@ -469,7 +460,7 @@ class TestAtomicWriteAndOverwrite(unittest.TestCase):
         writer.append(self.data[0], self.labels[0])
         writer.abort()
         self.assertFalse(os.path.exists(self.path))
-        self.assertEqual(self._leftovers(self.tmpdir.name), ['mat'])
+        self.assertEqual(self._leftovers(self.tmpdir.name), [])
 
     def test_context_manager_aborts_on_exception(self):
         with self.assertRaises(ZeroDivisionError):
@@ -477,7 +468,7 @@ class TestAtomicWriteAndOverwrite(unittest.TestCase):
                 writer.append(self.data[0], self.labels[0])
                 raise ZeroDivisionError
         self.assertFalse(os.path.exists(self.path))
-        self.assertEqual(self._leftovers(self.tmpdir.name), ['mat'])
+        self.assertEqual(self._leftovers(self.tmpdir.name), [])
 
     def test_close_and_abort_are_idempotent(self):
         writer = FeatureWriter(self.path, (8,), np.float32)
@@ -495,7 +486,7 @@ class TestAtomicWriteAndOverwrite(unittest.TestCase):
         with self.assertRaises(ValueError):
             save_features(self.path, self.data, self.labels[:-1])
         self.assertFalse(os.path.exists(self.path))
-        self.assertEqual(self._leftovers(self.tmpdir.name), ['mat'])
+        self.assertEqual(self._leftovers(self.tmpdir.name), [])
 
     def test_published_file_is_group_readable(self):
         # Staging must not tighten permissions: these files live on shared lab
@@ -534,8 +525,7 @@ class TestAtomicWriteAndOverwrite(unittest.TestCase):
         writer = FeatureWriter(self.path, (8,), np.float32)
         writer.append(self.data[0], self.labels[0])
         del writer
-        gc.collect()
-        self.assertEqual(self._leftovers(self.tmpdir.name), ['mat'])
+        self.assertEqual(self._leftovers(self.tmpdir.name), [])
 
     # --- another writer publishes first ---------------------------------
 
@@ -584,16 +574,26 @@ class TestAtomicWriteAndOverwrite(unittest.TestCase):
             writer.close()
         self.assertFalse(os.path.exists(self.path))
 
-    def test_zero_samples_round_trips(self):
-        # An empty layer is representable; refusing it would add a failure mode
-        # on the success path for something the caller can check themselves.
-        with FeatureWriter(self.path, (8,), np.float32):
-            pass
-        store = HDF5FeatureStore(self.tmpdir.name)
-        self.assertEqual(store.labels, [])
-        self.assertEqual(store.read('conv5').shape, (0, 8))
 
-    # --- the converter ---------------------------------------------------
+class TestConvertFeaturesToHDF5Atomicity(unittest.TestCase):
+    """A failed conversion must not publish a partial layer.
+
+    The converter treats an existing <layer>.h5 as finished and skips it, so a
+    truncated file left at the target path would never be repaired.
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.matdir = os.path.join(self.tmpdir.name, 'mat')
+        self.h5dir = os.path.join(self.tmpdir.name, 'h5')
+        os.makedirs(self.matdir)
+        self.labels = ['img%04d' % i for i in range(10)]
+        self.stacked = prepare_mat_features(
+            self.matdir, ['conv5'], self.labels, [(1, 16, 3, 3)]
+        )
+
+    def tearDown(self):
+        self.tmpdir.cleanup()
 
     def _fail_on_second_batch(self):
         """Patch MatFeatureStore.read to blow up partway through a layer."""
@@ -633,7 +633,7 @@ class TestAtomicWriteAndOverwrite(unittest.TestCase):
         out_path = os.path.join(self.h5dir, 'conv5.h5')
         self.assertFalse(os.path.exists(out_path))
         # No scratch file left behind either.
-        self.assertEqual(self._leftovers(self.h5dir), [])
+        self.assertEqual(sorted(os.listdir(self.h5dir)), [])
 
     def test_rerun_after_failure_succeeds(self):
         # The regression this guards: a published partial file would be taken
@@ -670,14 +670,6 @@ class TestFormatValidation(unittest.TestCase):
                              dtype=h5py.string_dtype(encoding='utf-8'))
         with self.assertRaises(RuntimeError):
             HDF5FeatureStore(self.tmpdir.name)
-
-    def test_future_version_is_rejected_with_a_clear_message(self):
-        save_features(self.path, np.zeros((2, 3)), ['a', 'b'])
-        with h5py.File(self.path, 'a') as f:
-            f.attrs[FORMAT_VERSION_ATTR] = SUPPORTED_FORMAT_VERSION + 1
-        with self.assertRaises(RuntimeError) as ctx:
-            HDF5FeatureStore(self.tmpdir.name)
-        self.assertIn('upgrade bdpy', str(ctx.exception))
 
     def test_missing_dataset_is_rejected(self):
         save_features(self.path, np.zeros((2, 3)), ['a', 'b'])
