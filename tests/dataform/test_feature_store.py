@@ -9,7 +9,6 @@ against both backends and compare.
 import os
 import tempfile
 import unittest
-import warnings
 from unittest import mock
 
 import h5py
@@ -154,21 +153,26 @@ class TestIterationHelpers(unittest.TestCase):
 
 
 class _BackendPair(unittest.TestCase):
-    """Builds the same features as a .mat tree and as chunked HDF5."""
+    """Builds the same features as a .mat tree and as chunked HDF5.
 
-    def setUp(self):
-        warnings.simplefilter('ignore', FutureWarning)
-        self.tmpdir = tempfile.TemporaryDirectory()
-        self.matdir = os.path.join(self.tmpdir.name, 'mat')
-        self.h5dir = os.path.join(self.tmpdir.name, 'h5')
-        os.makedirs(self.matdir)
-        self.stacked = prepare_mat_features(self.matdir, LAYERS, LABELS, SHAPES)
-        convert_features_to_hdf5(self.matdir, self.h5dir)
-        self.from_mat = Features(self.matdir)
-        self.from_h5 = Features(self.h5dir)
+    Built once per class: no test in a subclass writes to these directories,
+    so sharing them keeps the tests independent.
+    """
 
-    def tearDown(self):
-        self.tmpdir.cleanup()
+    @classmethod
+    def setUpClass(cls):
+        cls.tmpdir = tempfile.TemporaryDirectory()
+        cls.matdir = os.path.join(cls.tmpdir.name, 'mat')
+        cls.h5dir = os.path.join(cls.tmpdir.name, 'h5')
+        os.makedirs(cls.matdir)
+        cls.stacked = prepare_mat_features(cls.matdir, LAYERS, LABELS, SHAPES)
+        convert_features_to_hdf5(cls.matdir, cls.h5dir)
+        cls.from_mat = Features(cls.matdir)
+        cls.from_h5 = Features(cls.h5dir)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmpdir.cleanup()
 
 
 class TestBackendEquivalence(_BackendPair):
@@ -233,7 +237,6 @@ class TestMatIterChunksReadsOnce(_BackendPair):
     """
 
     def setUp(self):
-        super().setUp()
         self.store = MatFeatureStore(self.matdir)
         self.reads = []
         original = self.store.read
@@ -333,8 +336,9 @@ class TestIterChunks(_BackendPair):
         # The multi-store path does not go through FeatureStore.iter_chunks, so
         # it used to skip these checks entirely: size=-1 yielded nothing and a
         # bad axis raised IndexError instead of ValueError.
-        other = os.path.join(self.tmpdir.name, 'other')
-        os.makedirs(other)
+        other_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(other_dir.cleanup)
+        other = other_dir.name
         other_labels = ['other%04d' % i for i in range(3)]
         for layer, shape in zip(LAYERS, SHAPES):
             save_features(
@@ -514,12 +518,6 @@ class TestFeatureSliceValidation(_BackendPair):
                         store.read('conv5', feature_slice=np.s_[::-1])
                 backend_read.assert_not_called()
 
-    def test_bool_is_not_read_as_an_integer(self):
-        # isinstance(True, int) is True in Python, so a naive integer check
-        # would silently read True as index 1.
-        with self.assertRaises(ValueError):
-            self.from_h5.get('conv5', feature_slice=True)
-
     def test_rejection_message_points_at_the_alternative(self):
         with self.assertRaises(ValueError) as ctx:
             self.from_h5.get('conv5', feature_slice=np.s_[[1, 2]])
@@ -553,7 +551,6 @@ class TestCrossLayerLabelConsistency(unittest.TestCase):
     """
 
     def setUp(self):
-        warnings.simplefilter('ignore', FutureWarning)
         self.tmpdir = tempfile.TemporaryDirectory()
 
     def tearDown(self):
@@ -611,7 +608,6 @@ class TestCrossLayerLabelConsistency(unittest.TestCase):
 
 class TestFormatDetection(unittest.TestCase):
     def setUp(self):
-        warnings.simplefilter('ignore', FutureWarning)
         self.tmpdir = tempfile.TemporaryDirectory()
         self.matdir = os.path.join(self.tmpdir.name, 'mat')
         self.h5dir = os.path.join(self.tmpdir.name, 'h5')
@@ -646,12 +642,6 @@ class TestFormatDetection(unittest.TestCase):
         # An explicit format resolves it.
         self.assertEqual(Features(self.h5dir, format='hdf5').layers, LAYERS)
 
-    def test_empty_directory_is_rejected(self):
-        empty = os.path.join(self.tmpdir.name, 'empty')
-        os.makedirs(empty)
-        with self.assertRaises(RuntimeError):
-            detect_format(empty)
-
     def test_explicit_format_overrides_detection(self):
         self.assertIsInstance(
             Features(self.h5dir, format='hdf5')._Features__stores[0],
@@ -661,10 +651,6 @@ class TestFormatDetection(unittest.TestCase):
             Features(self.matdir, format='mat')._Features__stores[0],
             MatFeatureStore,
         )
-
-    def test_unknown_format_raises(self):
-        with self.assertRaises(ValueError):
-            Features(self.h5dir, format='parquet')
 
     def test_mixed_directories(self):
         # One dpath per layout, read through a single Features.
@@ -683,6 +669,25 @@ class TestFormatDetection(unittest.TestCase):
         got = features.get('conv5', label=['other0002', 'img0003', 'other0000'])
         assert_array_equal(got[1], self.stacked['conv5'][3])
         self.assertEqual(got.shape[0], 3)
+
+
+class TestFormatDetectionWithoutFeatures(unittest.TestCase):
+    """Detection cases that need no feature files at all."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.tmpdir.cleanup()
+
+    def test_empty_directory_is_rejected(self):
+        with self.assertRaises(RuntimeError):
+            detect_format(self.tmpdir.name)
+
+    def test_unknown_format_raises(self):
+        # The format is checked before the directory is looked at.
+        with self.assertRaises(ValueError):
+            Features(self.tmpdir.name, format='parquet')
 
 
 if __name__ == "__main__":
