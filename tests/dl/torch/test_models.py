@@ -93,14 +93,23 @@ class TestParseLayerName(unittest.TestCase):
                 self.assertEqual(getattr(layer, attr), value)
 
 
+# NOTE: VGG19 and AlexNet end in AdaptiveAvgPool2d, so smaller inputs would
+#       also run. 224x224 is kept because it is the resolution the models are
+#       used at, where the adaptive pool is the identity -- a smaller input
+#       takes the upsampling path instead. Construction, not forward, is what
+#       dominates the cost, so each class builds its model once.
+
+
 class TestVGG19(unittest.TestCase):
-    def setUp(self):
-        self.input_shape = (1, 3, 224, 224)
-        self.model = models.VGG19()
+    @classmethod
+    def setUpClass(cls):
+        cls.input_shape = (1, 3, 224, 224)
+        cls.model = models.VGG19()
 
     def test_forward(self):
-        x = torch.rand(self.input_shape)
-        output = self.model(x)
+        x = torch.rand(self.input_shape, generator=torch.Generator().manual_seed(0))
+        with torch.no_grad():
+            output = self.model(x)
         self.assertIsInstance(output, torch.Tensor)
         self.assertEqual(output.shape, (1, 1000))
 
@@ -112,13 +121,15 @@ class TestVGG19(unittest.TestCase):
 
 
 class TestAlexNet(unittest.TestCase):
-    def setUp(self):
-        self.input_shape = (1, 3, 224, 224)
-        self.model = models.AlexNet()
+    @classmethod
+    def setUpClass(cls):
+        cls.input_shape = (1, 3, 224, 224)
+        cls.model = models.AlexNet()
 
     def test_forward(self):
-        x = torch.rand(self.input_shape)
-        output = self.model(x)
+        x = torch.rand(self.input_shape, generator=torch.Generator().manual_seed(0))
+        with torch.no_grad():
+            output = self.model(x)
         self.assertIsInstance(output, torch.Tensor)
         self.assertEqual(output.shape, (1, 1000))
 
@@ -130,13 +141,16 @@ class TestAlexNet(unittest.TestCase):
 
 
 class TestAlexNetGenerator(unittest.TestCase):
-    def setUp(self):
-        self.input_shape = (1, 4096)
-        self.model = models.AlexNetGenerator()
+    @classmethod
+    def setUpClass(cls):
+        # A feature vector, not an image: 4096 is what defc7 expects.
+        cls.input_shape = (1, 4096)
+        cls.model = models.AlexNetGenerator()
 
     def test_forward(self):
-        x = torch.rand(self.input_shape)
-        output = self.model(x)
+        x = torch.rand(self.input_shape, generator=torch.Generator().manual_seed(0))
+        with torch.no_grad():
+            output = self.model(x)
         self.assertIsInstance(output, torch.Tensor)
         self.assertEqual(output.shape, (1, 3, 256, 256))
 
